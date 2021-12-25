@@ -55,6 +55,7 @@ pub enum BC {
     Add,
     Lt,
     AddA(Addr, Addr),
+    LtA(Addr, Addr),
     Car(Addr),
     Cdr(Addr),
 }
@@ -150,8 +151,8 @@ impl Arch {
     }
 
     fn lt(&mut self) {
-        let a = *self.stack.pop().unwrap().as_int();
         let b = *self.stack.pop().unwrap().as_int();
+        let a = *self.stack.pop().unwrap().as_int();
         let ret = Value::Int((a < b) as isize);
         self.push(ret);
     }
@@ -160,6 +161,13 @@ impl Arch {
         let a = self.arg(a).as_int();
         let b = self.arg(b).as_int();
         let ret = Value::Int(a + b);
+        self.push(ret);
+    }
+
+    fn lt_a(&mut self, a: usize, b: usize) {
+        let a = self.arg(a).as_int();
+        let b = self.arg(b).as_int();
+        let ret = Value::Int((a < b) as isize);
         self.push(ret);
     }
 
@@ -186,6 +194,7 @@ impl Arch {
                 Add         => self.add(),
                 Lt          => self.lt(),
                 AddA(a, b)  => self.add_a(*a, *b),
+                LtA(a, b)   => self.lt_a(*a, *b),
                 Arg(a)      => self.push(self.arg(*a).clone()),
                 Car(a)      => self.car(*a),
                 Cdr(a)      => self.cdr(*a),

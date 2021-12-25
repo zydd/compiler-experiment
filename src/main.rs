@@ -20,34 +20,38 @@ fn main() {
     // use bytecode::{Value, List};
     // use bytecode::Value::Int;
     // let mut prog = vec![
-    //     Push(0),
-    //     JumpZ(1),
-
-    //     Label(0),
-    //     // Debug(100),
-    //     AddA(0, 1),
-    //     // Debug(100),
-    //     StdReturn,
-
+    //     Jump(2),
     //     Label(1),
-    //     StdCall,
-    //     Push(2),
-    //     Push(2),
-    //     Call(0),
-    //     Pop(1),
+    //     LtA(1,2),
+    //     JumpZ(3),
+    //     PushFrame,
+    //     AddA(0,1),
+    //     Push(0),
+    //     Arg(1),
+    //     Add,
+    //     Arg(2),
+    //     Call(1),
+    //     Jump(4),
+    //     Label(3),
+    //     Arg(0),
+    //     Label(4),
+    //     Return,
 
-    //     Push(4),
-    //     Car(0),
-    //     Cdr(0),
+    //     Label(2),
+    //     PushFrame,
+    //     Push(1),
+    //     Push(2),
+    //     Push(3),
+    //     Call(1),
     // ];
     // bytecode::link(&mut prog);
 
-    // let mut data: Vec<Value> = Vec::new();
-    // data.insert(0, Int(0));
-    // data.insert(1, Int(1));
-    // data.insert(2, Int(2));
-    // data.insert(3, Int(3));
-    // data.insert(4, Value::List(List::from([Int(1), Int(2)])));
+    // let mut data: Vec<Value> = Vec::from([
+    //     Int(1),
+    //     Int(0),
+    //     Int(0),
+    //     Int(10000001)
+    // ]);
 
     // bytecode::execute(&prog, data);
 

@@ -182,13 +182,13 @@ impl Compile for S {
                             out.extend(cond.compile(ctx));
                         },
                         "+" => {
-                            out.extend(expr[2].compile(ctx));
                             out.extend(expr[1].compile(ctx));
+                            out.extend(expr[2].compile(ctx));
                             out.push(BC::Add);
                         },
                         "<" => {
-                            out.extend(expr[2].compile(ctx));
                             out.extend(expr[1].compile(ctx));
+                            out.extend(expr[2].compile(ctx));
                             out.push(BC::Lt);
                         },
                         _ => { // generic function call
