@@ -4,6 +4,18 @@ use crate::parser::*;
 use crate::bytecode::*;
 
 
+impl From<&S> for Value {
+    fn from(s: &S) -> Self {
+        match s {
+            S::Int(n) => Value::Int(n.clone()),
+            S::Float(n) => Value::Float(n.clone()),
+            S::Str(s) => Value::Str(s.clone()),
+            S::List(list) => Value::List(list.iter().map(|x| Value::from(x)).collect()),
+            _ => panic!("unimplemented type conversion"),
+        }
+    }
+}
+
 trait Compile {
     fn compile(&self, ctx: &mut Context) -> Vec<BC>;
 }
@@ -26,6 +38,8 @@ impl Context {
         };
         new.instr.insert("+".to_string(), (BC::Add, 2));
         new.instr.insert("<".to_string(), (BC::Lt, 2));
+        new.instr.insert("car".to_string(), (BC::Car, 1));
+        new.instr.insert("cdr".to_string(), (BC::Cdr, 1));
         return new
     }
 
@@ -135,8 +149,8 @@ impl Compile for S {
                         "if" => out.extend(compile_if(ctx, self)),
                         _ => {
                             if ctx.instr.contains_key(name) {
-                                let (ins, argc) = ctx.instr[name].clone();
-                                assert_eq!(argc, expr.len() - 1);
+                                let (ins, _argc) = ctx.instr[name].clone();
+                                // assert_eq!(argc, expr.len() - 1);
                                 for arg in expr.iter().skip(1) {
                                     out.extend(arg.compile(ctx));
                                 }
@@ -162,16 +176,14 @@ impl Compile for S {
             },
             S::List(_) => {
                 let addr = ctx.data.len();
-                // TODO: support list
-                ctx.data.push(Value::List(List::new()));
+                ctx.data.push(Value::from(self));
                 out.push(BC::Push(addr));
             },
             S::Token(name) => {
                 out.extend(ctx.get(name).expect(name))
             },
             _ => {
-                println!("{:?}", self);
-                out.push(BC::Debug(137));
+                panic!("unimplemented")
             }
         }
         return out

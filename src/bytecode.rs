@@ -19,8 +19,8 @@ struct Arch {
 #[derive(Clone, Debug)]
 pub enum Value {
     Int(isize),
-    // Float(f64),
-    // Str(SString),
+    Float(f64),
+    Str(String),
     List(List),
     Addr(Addr),
     None,
@@ -36,6 +36,9 @@ impl Value {
     pub fn as_list(&self) -> &List {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
     }
+    pub fn as_list_mut(self) -> List {
+        if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
+    }
 }
 
 
@@ -44,6 +47,8 @@ pub enum BC {
     // Data(Value),
     Arg(Addr),
     Call(Addr),
+    Car,
+    Cdr,
     Return,
     PushFrame,
     Push(Addr),
@@ -56,8 +61,8 @@ pub enum BC {
     Lt,
     AddA(Addr, Addr),
     LtA(Addr, Addr),
-    Car(Addr),
-    Cdr(Addr),
+    CarA(Addr),
+    CdrA(Addr),
 }
 
 // impl BC {
@@ -125,7 +130,7 @@ impl Arch {
         self.ap = self.fp;
         self.ip = addr;
     }
-    
+
     fn arg(&self, i: Addr) -> &Value {
         return &self.stack[self.ap + i]
     }
@@ -171,12 +176,23 @@ impl Arch {
         self.push(ret);
     }
 
-    fn car(&mut self, list: Addr) {
+    fn car_a(&mut self, list: Addr) {
         let head = self.arg(list).as_list()[0].clone();
         self.push(head);
     }
 
-    fn cdr(&mut self, list: Addr) {
+    fn car(&mut self) {
+        let head = self.stack.pop().unwrap().as_list()[0].clone();
+        self.push(head);
+    }
+
+    fn cdr(&mut self) {
+        let mut tail = self.stack.pop().unwrap().as_list_mut();
+        tail.pop_front();
+        self.push(Value::List(tail));
+    }
+
+    fn cdr_a(&mut self, list: Addr) {
         let mut tail = self.arg(list).as_list().clone();
         tail.pop_front();
         self.push(Value::List(tail));
@@ -193,11 +209,13 @@ impl Arch {
             match instr {
                 Add         => self.add(),
                 Lt          => self.lt(),
+                Car         => self.car(),
+                Cdr         => self.cdr(),
                 AddA(a, b)  => self.add_a(*a, *b),
                 LtA(a, b)   => self.lt_a(*a, *b),
                 Arg(a)      => self.push(self.arg(*a).clone()),
-                Car(a)      => self.car(*a),
-                Cdr(a)      => self.cdr(*a),
+                CarA(a)     => self.car_a(*a),
+                CdrA(a)     => self.cdr_a(*a),
                 PushFrame   => self.push_frame(),
                 Push(v)     => self.push(self.stack[*v].clone()),
                 Pop(n)      => self.pop(*n),
