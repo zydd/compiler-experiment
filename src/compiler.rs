@@ -5,25 +5,83 @@ use crate::bytecode::*;
 
 type Label = usize;
 
+
+enum CodeGen {
+    Arg(usize),
+    Fn(usize),
+    Builtin(BuiltinFunction),
+}
+
+
 struct Context {
     label_index: Label,
     data: Vec<Value>,
-    scope: Vec<HashMap<String, Code>>,
+    scope: Vec<HashMap<String, CodeGen>>,
 }
 
 
-struct Function {
-    // name: String,
-    // args: Vec<String>,
-    label: Label,
-    // code: Vec<BC>,
+impl Context {
+    fn new() -> Context {
+        let mut new = Context{
+            label_index: 1000,
+            data: Vec::new(),
+            scope: vec![HashMap::new()],
+        };
+        new.set("+".to_string(), CodeGen::Builtin(BuiltinFunction::Add));
+        new.set("<".to_string(), CodeGen::Builtin(BuiltinFunction::Lt));
+        new.set("car".to_string(), CodeGen::Builtin(BuiltinFunction::Car));
+        new.set("cdr".to_string(), CodeGen::Builtin(BuiltinFunction::Cdr));
+        return new
+    }
+
+    fn new_label(&mut self) -> Label {
+        let label = self.label_index;
+        self.label_index += 1;
+        return label
+    }
+
+    fn get(&self, key: &String) -> Option<&CodeGen> {
+        for scope in self.scope.iter().rev() {
+            if let Some(v) = scope.get(key) {
+                return Some(v)
+            }
+        }
+
+        println!("name not found in scope: {}", key);
+
+        return None
+    }
+
+    fn set(&mut self, var: String, code: CodeGen) {
+        let current = self.scope.last_mut().unwrap();
+        current.insert(var, code);
+    }
+
+    fn enter(&mut self) {
+        self.scope.push(HashMap::new());
+    }
+
+    fn exit(&mut self) {
+        self.scope.pop();
+    }
 }
 
 
-enum Code {
-    Arg(usize),
-    Fn(Function),
-    Instr(BC, usize)
+impl CodeGen {
+    fn value(&self) -> Vec<BC> {
+        match self {
+            CodeGen::Builtin(id)    => vec![BC::PushFn(id.clone() as usize)],
+            CodeGen::Arg(i)         => vec![BC::Arg(*i)],
+            CodeGen::Fn(label)      => vec![BC::PushFn(*label)],
+        }
+    }
+    fn invoke(&self) -> Vec<BC> {
+        match self {
+            CodeGen::Builtin(bc)    => vec![BC::Builtin(bc.clone())],
+            CodeGen::Arg(i)         => vec![BC::Arg(*i), BC::Builtin(BuiltinFunction::Invoke)],
+            CodeGen::Fn(label)      => vec![BC::Call(*label)],
+        }
+    }
 }
 
 
@@ -40,70 +98,6 @@ impl From<&S> for Value {
 }
 
 
-impl Context {
-    fn new() -> Context {
-        let mut new = Context{
-            label_index: 0,
-            data: Vec::new(),
-            scope: vec![HashMap::new()],
-        };
-        new.set("+".to_string(), Code::Instr(BC::Add, 2));
-        new.set("<".to_string(), Code::Instr(BC::Lt, 2));
-        new.set("car".to_string(), Code::Instr(BC::Car, 1));
-        new.set("cdr".to_string(), Code::Instr(BC::Cdr, 1));
-        return new
-    }
-
-    fn new_label(&mut self) -> Label {
-        let label = self.label_index;
-        self.label_index += 1;
-        return label
-    }
-
-    fn get(&self, key: &String) -> Option<&Code> {
-        for scope in self.scope.iter().rev() {
-            if let Some(v) = scope.get(key) {
-                return Some(v)
-            }
-        }
-
-        return None
-    }
-
-    fn set(&mut self, var: String, code: Code) {
-        let current = self.scope.last_mut().unwrap();
-        current.insert(var, code);
-    }
-
-    fn enter(&mut self) {
-        self.scope.push(HashMap::new());
-    }
-
-    fn exit(&mut self) {
-        self.scope.pop();
-    }
-}
-
-
-impl Code {
-    fn value(&self) -> Vec<BC> {
-        match self {
-            // Code::Instr(bc, _args) => vec![bc.clone()],
-            Code::Arg(i) => vec![BC::Arg(*i)],
-            Code::Fn(func) => vec![BC::PushFn(func.label)],
-            _ => panic!()
-        }
-    }
-    fn invoke(&self) -> Vec<BC> {
-        match self {
-            Code::Instr(bc, _args) => vec![bc.clone()],
-            Code::Arg(i) => vec![BC::Arg(*i), BC::Invoke],
-            Code::Fn(func) => vec![BC::Call(func.label)],
-        }
-    }
-}
-
-
 fn compile_function(ctx: &mut Context, expr: &S) -> Vec<BC> {
     let expr = expr.as_expr();
     let name = expr[1].as_expr()[0].as_token();
@@ -114,16 +108,11 @@ fn compile_function(ctx: &mut Context, expr: &S) -> Vec<BC> {
 
     let label = ctx.new_label();
 
-    ctx.set(name.clone(), Code::Fn(Function{
-        // name: name.clone(),
-        // args: Vec::new(),
-        label: label,
-        // code: Vec::new(),
-    }));
+    ctx.set(name.clone(), CodeGen::Fn(label));
     ctx.enter();
 
     for (i, arg) in args.enumerate() {
-        ctx.set(arg, Code::Arg(i));
+        ctx.set(arg, CodeGen::Arg(i));
     }
 
     let after = ctx.new_label();

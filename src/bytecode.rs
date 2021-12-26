@@ -28,11 +28,7 @@ pub enum Value {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum BC {
-    Add,
-    Car,
-    Cdr,
-    Invoke,
-    Lt,
+    Builtin(BuiltinFunction),
     AddA(Addr, Addr),
     Arg(Addr),
     CarA(Addr),
@@ -47,6 +43,16 @@ pub enum BC {
     Push(Addr),
     PushFn(Addr),
     Return(usize),
+}
+
+use num_traits::FromPrimitive;
+#[derive(Clone, Debug, num_derive::FromPrimitive)]
+pub enum BuiltinFunction {
+    Add,
+    Car,
+    Cdr,
+    Invoke,
+    Lt,
 }
 
 
@@ -176,44 +182,57 @@ impl Arch {
         self.push(Value::List(tail));
     }
 
-    fn exec(&mut self, program: &[BC]) {
-        use BC::*;
+    fn invoke(&mut self) {
+        let top = self.stack.pop().unwrap();
+        let addr = *top.as_fn_addr();
+        if addr < 1000 {
+            let func = BuiltinFunction::from_usize(addr).unwrap();
+            self.instr(BC::Builtin(func));
+        } else {
+            self.call(addr)
+        }
+    }
 
+    fn jumpz(&mut self, addr: Addr) {
+        let top = self.stack.pop().unwrap();
+        if self.is_false(top) {
+            self.ip = addr;
+        }
+    }
+
+    fn instr(&mut self, instr: BC) {
+        use BC::*;
+        use BuiltinFunction::*;
+
+        match instr {
+            Builtin(Add)    => self.add(),
+            Builtin(Car)    => self.car(),
+            Builtin(Cdr)    => self.cdr(),
+            Builtin(Lt)     => self.lt(),
+            Builtin(Invoke) => self.invoke(),
+            Return(argc)    => self.stdreturn(argc),
+            AddA(a, b)      => self.add_a(a, b),
+            Arg(a)          => self.push(self.arg(a).clone()),
+            Call(addr)      => self.call(addr),
+            CarA(a)         => self.car_a(a),
+            CdrA(a)         => self.cdr_a(a),
+            Debug(n)        => self.debug(n),
+            Jump(addr)      => self.ip = addr,
+            LtA(a, b)       => self.lt_a(a, b),
+            Pop(n)          => self.pop(n),
+            Push(v)         => self.push(self.stack[v].clone()),
+            PushFn(addr)    => self.push(Value::Function(addr)),
+            JumpZ(addr)     => self.jumpz(addr),
+            Label(_)        => (),
+        }
+    }
+
+    fn exec(&mut self, program: &[BC]) {
         while self.ip < program.len() {
             let instr = &program[self.ip];
             self.ip += 1;
             // println!("ip: {} {:?} {:?}", self.ip, instr, self);
-
-            match instr {
-                Add             => self.add(),
-                Car             => self.car(),
-                Cdr             => self.cdr(),
-                Lt              => self.lt(),
-                Return(argc)    => self.stdreturn(*argc),
-                AddA(a, b)      => self.add_a(*a, *b),
-                Arg(a)          => self.push(self.arg(*a).clone()),
-                Call(addr)      => self.call(*addr),
-                CarA(a)         => self.car_a(*a),
-                CdrA(a)         => self.cdr_a(*a),
-                Debug(n)        => self.debug(*n),
-                Jump(addr)      => self.ip = *addr,
-                LtA(a, b)       => self.lt_a(*a, *b),
-                Pop(n)          => self.pop(*n),
-                Push(v)         => self.push(self.stack[*v].clone()),
-                PushFn(addr)    => self.push(Value::Function(*addr)),
-                JumpZ(addr)     => {
-                    let top = self.stack.pop().unwrap();
-                    if self.is_false(top) {
-                        self.ip = *addr;
-                        continue
-                    }
-                },
-                Invoke          => {
-                    let top = self.stack.pop().unwrap();
-                    self.call(*top.as_fn_addr())
-                },
-                Label(_)        => (),
-            }
+            self.instr(instr.clone());
         }
     }
 }
@@ -227,10 +246,10 @@ pub fn link(program: &mut [BC]) {
     }
     for (_, instr) in program.iter_mut().enumerate() {
         match instr {
-            BC::Jump(index)     => *instr = BC::Jump(map_label_addr[&index]),
-            BC::JumpZ(index)    => *instr = BC::JumpZ(map_label_addr[&index]),
-            BC::Call(index)     => *instr = BC::Call(map_label_addr[&index]),
-            BC::PushFn(index)   => *instr = BC::PushFn(map_label_addr[&index]),
+            BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
+            BC::JumpZ(index)    => *instr = BC::JumpZ(map_label_addr[index]),
+            BC::Call(index)     => *instr = BC::Call(map_label_addr[index]),
+            BC::PushFn(index)   => *instr = BC::PushFn(if *index < 1000 { *index } else { map_label_addr[index]}),
             _ => ()
         }
     }
