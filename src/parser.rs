@@ -13,6 +13,7 @@ pub enum S {
     Empty,
 }
 
+#[allow(dead_code)]
 impl S {
     pub fn as_list(&self) -> &Vec<S> {
         if let S::List(list) = self { list } else { panic!("not a list: {}", self) }
