@@ -3,30 +3,42 @@ use std::collections::HashMap;
 use crate::parser::*;
 use crate::bytecode::*;
 
+type Label = usize;
+
+struct Context {
+    label_index: Label,
+    data: Vec<Value>,
+    scope: Vec<HashMap<String, Code>>,
+}
+
+
+struct Function {
+    // name: String,
+    // args: Vec<String>,
+    label: Label,
+    // code: Vec<BC>,
+}
+
+
+enum Code {
+    Arg(usize),
+    Fn(Function),
+    Instr(BC, usize)
+}
+
 
 impl From<&S> for Value {
     fn from(s: &S) -> Self {
         match s {
-            S::Int(n) => Value::Int(n.clone()),
-            S::Float(n) => Value::Float(n.clone()),
-            S::Str(s) => Value::Str(s.clone()),
-            S::List(list) => Value::List(list.iter().map(|x| Value::from(x)).collect()),
+            S::Int(n)       => Value::Int(n.clone()),
+            S::Float(n)     => Value::Float(n.clone()),
+            S::Str(s)       => Value::Str(s.clone()),
+            S::List(list)   => Value::List(list.iter().map(|x| Value::from(x)).collect()),
             _ => panic!("unimplemented type conversion"),
         }
     }
 }
 
-trait Compile {
-    fn compile(&self, ctx: &mut Context) -> Vec<BC>;
-}
-
-
-struct Context {
-    label_index: usize,
-    data: Vec<Value>,
-    scope: Vec<HashMap<String, Vec<BC>>>,
-    instr: HashMap<String, (BC, usize)>,
-}
 
 impl Context {
     fn new() -> Context {
@@ -34,34 +46,33 @@ impl Context {
             label_index: 0,
             data: Vec::new(),
             scope: vec![HashMap::new()],
-            instr: HashMap::new(),
         };
-        new.instr.insert("+".to_string(), (BC::Add, 2));
-        new.instr.insert("<".to_string(), (BC::Lt, 2));
-        new.instr.insert("car".to_string(), (BC::Car, 1));
-        new.instr.insert("cdr".to_string(), (BC::Cdr, 1));
+        new.set("+".to_string(), Code::Instr(BC::Add, 2));
+        new.set("<".to_string(), Code::Instr(BC::Lt, 2));
+        new.set("car".to_string(), Code::Instr(BC::Car, 1));
+        new.set("cdr".to_string(), Code::Instr(BC::Cdr, 1));
         return new
     }
 
-    fn new_label(&mut self) -> usize {
+    fn new_label(&mut self) -> Label {
         let label = self.label_index;
         self.label_index += 1;
         return label
     }
 
-    fn get(&mut self, key: &String) -> Option<Vec<BC>> {
-        for s in self.scope.iter().rev() {
-            if let Some(instr) = s.get(key) {
-                return Some(instr.clone())
+    fn get(&self, key: &String) -> Option<&Code> {
+        for scope in self.scope.iter().rev() {
+            if let Some(v) = scope.get(key) {
+                return Some(v)
             }
         }
 
         return None
     }
 
-    fn set(&mut self, var: String, instr: &[BC]) {
+    fn set(&mut self, var: String, code: Code) {
         let current = self.scope.last_mut().unwrap();
-        current.insert(var, Vec::from(instr));
+        current.insert(var, code);
     }
 
     fn enter(&mut self) {
@@ -73,20 +84,46 @@ impl Context {
     }
 }
 
+
+impl Code {
+    fn value(&self) -> Vec<BC> {
+        match self {
+            // Code::Instr(bc, _args) => vec![bc.clone()],
+            Code::Arg(i) => vec![BC::Arg(*i)],
+            Code::Fn(func) => vec![BC::PushFn(func.label)],
+            _ => panic!()
+        }
+    }
+    fn invoke(&self) -> Vec<BC> {
+        match self {
+            Code::Instr(bc, _args) => vec![bc.clone()],
+            Code::Arg(i) => vec![BC::Arg(*i), BC::Invoke],
+            Code::Fn(func) => vec![BC::Call(func.label)],
+        }
+    }
+}
+
+
 fn compile_function(ctx: &mut Context, expr: &S) -> Vec<BC> {
     let expr = expr.as_expr();
     let name = expr[1].as_expr()[0].as_token();
     let args = expr[1].as_expr().iter().skip(1).map(|x| x.as_token().clone());
+    let argc = args.len();
     let body = expr[2].clone();
     let mut out = Vec::new();
 
     let label = ctx.new_label();
 
-    ctx.set(name.clone(), &[BC::Call(label)]);
+    ctx.set(name.clone(), Code::Fn(Function{
+        // name: name.clone(),
+        // args: Vec::new(),
+        label: label,
+        // code: Vec::new(),
+    }));
     ctx.enter();
 
     for (i, arg) in args.enumerate() {
-        ctx.set(arg, &[BC::Arg(i)]);
+        ctx.set(arg, Code::Arg(i));
     }
 
     let after = ctx.new_label();
@@ -96,7 +133,7 @@ fn compile_function(ctx: &mut Context, expr: &S) -> Vec<BC> {
     ]);
     out.extend(body.compile(ctx));
     out.extend([
-        BC::Return,
+        BC::Return(argc),
         BC::Label(after),
     ]);
 
@@ -133,37 +170,24 @@ fn compile_if(ctx: &mut Context, expr: &S) -> Vec<BC> {
 }
 
 
-impl Compile for S {
+impl S {
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
         match self {
             S::S(expr) => {
-                // if expr.is_empty() {
-                //     let addr = ctx.data.len();
-                //     ctx.data.push(Value::List(List::new()));
-                //     out.push(BC::Push(addr));
-                // } else 
                 if let S::Token(name) = &expr[0] {
                     match name.as_str() {
                         "def" => out.extend(compile_function(ctx, self)),
                         "if" => out.extend(compile_if(ctx, self)),
                         _ => {
-                            if ctx.instr.contains_key(name) {
-                                let (ins, _argc) = ctx.instr[name].clone();
-                                // assert_eq!(argc, expr.len() - 1);
-                                for arg in expr.iter().skip(1) {
-                                    out.extend(arg.compile(ctx));
-                                }
-                                out.push(ins);
-                            } else {
-                                // TODO: assert paramenter count
-                                out.push(BC::PushFrame);
+                            let mut args = Vec::new();
+                            for el in expr.iter().skip(1).rev() {
+                                args.extend(el.compile(ctx));
+                            }
 
-                                for arg in expr.iter().skip(1) {
-                                    out.extend(arg.compile(ctx));
-                                }
-                                // function call
-                                out.extend(ctx.get(name).expect(name));
+                            if let Some(func) = ctx.get(name) {
+                                out.extend(args);
+                                out.extend(func.invoke());
                             }
                         },
                     }
@@ -180,7 +204,7 @@ impl Compile for S {
                 out.push(BC::Push(addr));
             },
             S::Token(name) => {
-                out.extend(ctx.get(name).expect(name))
+                out.extend(ctx.get(name).unwrap().value())
             },
             _ => {
                 panic!("unimplemented")

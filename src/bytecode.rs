@@ -11,7 +11,6 @@ pub type List = VecDeque<Value>;
 struct Arch {
     ip: Addr,
     fp: Addr,
-    ap: Addr,
     stack: Vec<Value>,
 }
 
@@ -23,8 +22,33 @@ pub enum Value {
     Str(String),
     List(List),
     Addr(Addr),
-    None,
+    Function(Addr),
 }
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub enum BC {
+    Add,
+    Car,
+    Cdr,
+    Invoke,
+    Lt,
+    AddA(Addr, Addr),
+    Arg(Addr),
+    CarA(Addr),
+    CdrA(Addr),
+    Call(Addr),
+    Debug(usize),
+    Label(Addr),
+    LtA(Addr, Addr),
+    Jump(Addr),
+    JumpZ(Addr),
+    Pop(usize),
+    Push(Addr),
+    PushFn(Addr),
+    Return(usize),
+}
+
 
 impl Value {
     pub fn as_int(&self) -> &isize {
@@ -32,6 +56,9 @@ impl Value {
     }
     pub fn as_addr(&self) -> &Addr {
         if let Value::Addr(a) = self { a } else { panic!("not an addr: {:?}", self) }
+    }
+    pub fn as_fn_addr(&self) -> &Addr {
+        if let Value::Function(a) = self { a } else { panic!("not function: {:?}", self) }
     }
     pub fn as_list(&self) -> &List {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
@@ -41,43 +68,12 @@ impl Value {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub enum BC {
-    // Data(Value),
-    Arg(Addr),
-    Call(Addr),
-    Car,
-    Cdr,
-    Return,
-    PushFrame,
-    Push(Addr),
-    Pop(usize),
-    Jump(Addr),
-    JumpZ(Addr),
-    Label(Addr),
-    Debug(usize),
-    Add,
-    Lt,
-    AddA(Addr, Addr),
-    LtA(Addr, Addr),
-    CarA(Addr),
-    CdrA(Addr),
-}
-
-// impl BC {
-//     fn as_data(&self) -> &Value {
-//         if let BC::Data(v) = self { v } else { panic!("not BC::Data: {:?}", self) }
-//     }
-// }
-
 
 impl Arch {
     fn new(data: Vec<Value>) -> Arch {
         let new = Arch{
             ip: 0,
             fp: data.len(),
-            ap: data.len(),
             stack: data,
         };
 
@@ -89,50 +85,32 @@ impl Arch {
         match v {
             Int(n)      => n == 0,
             List(list)  => list.is_empty(),
-            None        => true,
             _           => panic!("invalid test: {:?}", v)
         }
     }
 
-    // fn return_value(&mut self, v: Value) {
-    //     // let raddr = *self.stack[self.stack.len() - 1].as_addr();
-    //     let frame = *self.stack[self.fp - 1].as_addr();
-    //     self.stack[self.fp - 2] = v;
-    //     self.stack.truncate(self.fp - 1);
-    //     self.fp = frame;
-    //     // self.ip = raddr;
-    // }
-
-    fn stdreturn(&mut self) {
-        let caller  = *self.stack[self.fp - 3].as_addr();
-        let argp    = *self.stack[self.fp - 2].as_addr();
-        let frame   = *self.stack[self.fp - 1].as_addr();
-        self.stack[self.fp - 4] = self.stack.pop().unwrap();
-        self.stack.truncate(self.fp - 3); // leave return value
+    fn stdreturn(&mut self, argc: usize) {
+        let raddr   = *self.stack[self.fp + 0].as_addr();
+        let framep  = *self.stack[self.fp + 1].as_addr();
+        let ret     = self.stack.pop().unwrap();
+        self.stack.truncate(self.fp - argc);
+        self.stack.push(ret);
         // println!("frame: {} -> {}", self.fp, frame);
-        self.fp = frame;
-        self.ap = argp;
-        self.ip = caller;
-    }
-
-    fn push_frame(&mut self) {
-        self.stack.push(Value::None); // return value (fp-4)
-        self.stack.push(Value::None); // return addr (fp-3)
-        self.stack.push(Value::Addr(self.ap)); // arg pointer (fp-2)
-        self.stack.push(Value::Addr(self.fp)); // previous frame (fp-1)
-
-        // println!("frame: {} -> {}", self.fp, self.stack.len());
-        self.fp = self.stack.len();
+        self.fp = framep;
+        self.ip = raddr;
     }
 
     fn call(&mut self, addr: Addr) {
-        self.stack[self.fp - 3] = Value::Addr(self.ip);
-        self.ap = self.fp;
+        let fp = self.fp;
+        self.fp = self.stack.len();
+        self.stack.push(Value::Addr(self.ip)); // return addr (fp+0)
+        self.stack.push(Value::Addr(fp)); // previous frame (fp+1)
+
         self.ip = addr;
     }
 
     fn arg(&self, i: Addr) -> &Value {
-        return &self.stack[self.ap + i]
+        return &self.stack[self.fp-1 - i]
     }
 
     fn push(&mut self, v: Value) {
@@ -207,34 +185,34 @@ impl Arch {
             // println!("ip: {} {:?} {:?}", self.ip, instr, self);
 
             match instr {
-                Add         => self.add(),
-                Lt          => self.lt(),
-                Car         => self.car(),
-                Cdr         => self.cdr(),
-                AddA(a, b)  => self.add_a(*a, *b),
-                LtA(a, b)   => self.lt_a(*a, *b),
-                Arg(a)      => self.push(self.arg(*a).clone()),
-                CarA(a)     => self.car_a(*a),
-                CdrA(a)     => self.cdr_a(*a),
-                PushFrame   => self.push_frame(),
-                Push(v)     => self.push(self.stack[*v].clone()),
-                Pop(n)      => self.pop(*n),
-                Debug(n)    => self.debug(*n),
-                Jump(addr)  => {
-                    self.ip = *addr;
-                    continue
-                },
-                JumpZ(addr) => {
+                Add             => self.add(),
+                Car             => self.car(),
+                Cdr             => self.cdr(),
+                Lt              => self.lt(),
+                Return(argc)    => self.stdreturn(*argc),
+                AddA(a, b)      => self.add_a(*a, *b),
+                Arg(a)          => self.push(self.arg(*a).clone()),
+                Call(addr)      => self.call(*addr),
+                CarA(a)         => self.car_a(*a),
+                CdrA(a)         => self.cdr_a(*a),
+                Debug(n)        => self.debug(*n),
+                Jump(addr)      => self.ip = *addr,
+                LtA(a, b)       => self.lt_a(*a, *b),
+                Pop(n)          => self.pop(*n),
+                Push(v)         => self.push(self.stack[*v].clone()),
+                PushFn(addr)    => self.push(Value::Function(*addr)),
+                JumpZ(addr)     => {
                     let top = self.stack.pop().unwrap();
                     if self.is_false(top) {
                         self.ip = *addr;
                         continue
                     }
                 },
-                Call(addr)  => self.call(*addr),
-                Return      => self.stdreturn(),
-                Label(_)    => (),
-                // Data(_)     => panic!("cannot execute data"),
+                Invoke          => {
+                    let top = self.stack.pop().unwrap();
+                    self.call(*top.as_fn_addr())
+                },
+                Label(_)        => (),
             }
         }
     }
@@ -252,6 +230,7 @@ pub fn link(program: &mut [BC]) {
             BC::Jump(index)     => *instr = BC::Jump(map_label_addr[&index]),
             BC::JumpZ(index)    => *instr = BC::JumpZ(map_label_addr[&index]),
             BC::Call(index)     => *instr = BC::Call(map_label_addr[&index]),
+            BC::PushFn(index)   => *instr = BC::PushFn(map_label_addr[&index]),
             _ => ()
         }
     }
