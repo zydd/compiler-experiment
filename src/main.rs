@@ -64,6 +64,7 @@ fn main() {
     println!("{:?}", comp);
 
     bytecode::link(&mut comp.0);
+    println!("{:?}", comp);
 
     bytecode::execute(&comp.0, comp.1);
 }

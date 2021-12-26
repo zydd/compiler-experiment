@@ -23,7 +23,7 @@ struct Context {
 impl Context {
     fn new() -> Context {
         let mut new = Context{
-            label_index: 1000,
+            label_index: 0,
             data: Vec::new(),
             scope: vec![HashMap::new()],
         };
@@ -31,6 +31,8 @@ impl Context {
         new.set("<".to_string(), CodeGen::Builtin(BuiltinFunction::Lt));
         new.set("car".to_string(), CodeGen::Builtin(BuiltinFunction::Car));
         new.set("cdr".to_string(), CodeGen::Builtin(BuiltinFunction::Cdr));
+        new.set("__builtin_invoke".to_string(), CodeGen::Builtin(BuiltinFunction::Invoke));
+        new.set("__builtin_nop".to_string(), CodeGen::Builtin(BuiltinFunction::Nop));
         return new
     }
 
@@ -70,7 +72,7 @@ impl Context {
 impl CodeGen {
     fn value(&self) -> Vec<BC> {
         match self {
-            CodeGen::Builtin(id)    => vec![BC::PushFn(id.clone() as usize)],
+            CodeGen::Builtin(id)    => vec![BC::PushIns(id.clone() as usize)],
             CodeGen::Arg(i)         => vec![BC::Arg(*i)],
             CodeGen::Fn(label)      => vec![BC::PushFn(*label)],
         }
@@ -159,27 +161,43 @@ fn compile_if(ctx: &mut Context, expr: &S) -> Vec<BC> {
 }
 
 
+fn compile_call(ctx: &mut Context, expr: &[S], deferred: bool) -> Vec<BC> {
+    let mut out = Vec::new();
+    let name = expr[0].as_token();
+    let mut args = Vec::new();
+
+    for el in expr.iter().skip(1).rev() {
+        args.extend(el.compile(ctx));
+    }
+
+    let func = ctx.get(name).unwrap();
+    out.extend(args);
+    if deferred {
+        out.extend(func.value());
+        out.push(BC::Defer(expr.len()));
+    } else {
+        out.extend(func.invoke());
+    }
+
+    return out
+}
+
+
 impl S {
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
         match self {
             S::S(expr) => {
-                if let S::Token(name) = &expr[0] {
+                if expr.is_empty() {
+                    out.push(BC::Builtin(BuiltinFunction::Nop));
+                } else if let S::Token(name) = &expr[0] {
                     match name.as_str() {
-                        "def" => out.extend(compile_function(ctx, self)),
-                        "if" => out.extend(compile_if(ctx, self)),
-                        _ => {
-                            let mut args = Vec::new();
-                            for el in expr.iter().skip(1).rev() {
-                                args.extend(el.compile(ctx));
-                            }
-
-                            if let Some(func) = ctx.get(name) {
-                                out.extend(args);
-                                out.extend(func.invoke());
-                            }
-                        },
+                        "def"   => out.extend(compile_function(ctx, self)),
+                        "if"    => out.extend(compile_if(ctx, self)),
+                        _       => out.extend(compile_call(ctx, expr, false)),
                     }
+                } else {
+                    panic!("not a function call: {:?}", expr)
                 }
             },
             S::Int(n) => {
@@ -193,7 +211,10 @@ impl S {
                 out.push(BC::Push(addr));
             },
             S::Token(name) => {
-                out.extend(ctx.get(name).unwrap().value())
+                out.extend(ctx.get(name).unwrap().value());
+            },
+            S::Deferred(expr) => {
+                out.extend(compile_call(ctx, expr.as_expr(), true));
             },
             _ => {
                 panic!("unimplemented")

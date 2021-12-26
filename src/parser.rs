@@ -9,6 +9,7 @@ pub enum S {
     Str(String),
     Token(String),
     List(Vec<S>),
+    Deferred(Box<S>),
     S(Vec<S>),
     Empty,
 }
@@ -20,6 +21,9 @@ impl S {
     }
     pub fn as_expr(&self) -> &Vec<S> {
         if let S::S(list) = self { list } else { panic!("not an expression") }
+    }
+    pub fn as_def(&self) -> &Vec<S> {
+        if let S::Deferred(list) = self { list.as_expr() } else { panic!("not a defferred expression") }
     }
     pub fn as_token(&self) -> &String {
         if let S::Token(str) = self { str } else { panic!("not a token") }
@@ -39,11 +43,12 @@ impl S {
 impl std::fmt::Display for S {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            S::Int(i)   => write!(f, "{}", i),
-            S::Float(i) => write!(f, "{}", i),
-            S::Str(s)   => write!(f, "{:?}", s),
-            S::Token(s) => write!(f, "{}", s),
-            S::Empty    => write!(f, "{{}}"),
+            S::Int(i)       => write!(f, "{}", i),
+            S::Float(i)     => write!(f, "{}", i),
+            S::Str(s)       => write!(f, "{:?}", s),
+            S::Token(s)     => write!(f, "{}", s),
+            S::Deferred(s)  => write!(f, "'{}", s),
+            S::Empty        => write!(f, "{{}}"),
             S::List(list) | S::S(list) => {
                 write!(f, "{}", if let S::S(_) = self {"("} else {"["})?;
                 for (i, el) in list.iter().enumerate() {
@@ -59,16 +64,34 @@ impl std::fmt::Display for S {
 }
 
 
+#[derive(Debug)]
+struct ParserState {
+    par: Option<char>,
+    defer_next: bool,
+    list: Vec<S>,
+}
+
+impl ParserState {
+    fn new(par: Option<char>) -> ParserState {
+        return ParserState{
+            par: par,
+            defer_next: false,
+            list: vec![],
+        }
+    }
+}
+
 pub fn parse(code: String) -> Result<Vec<S>, String> {
-    let mut stack: Vec<Vec<S>> = vec![vec![]];
+    let mut stack: Vec<ParserState> = Vec::new();
+    let mut state = ParserState::new(None);
 
     let re_token = Regex::new(
         "^;[^\\n]*\
         |^\\s+\
+        |^(?P<d>')\
         |^(?P<p>[()])\
         |^(?P<b>[\\[\\]])\
-        |^'(?P<q>[^'\\\\]*(\\\\.[^'\\\\]*)*)'\
-        |^\"(?P<qq>[^\"\\\\]*(\\\\.[^\"\\\\]*)*)\"\
+        |^\"(?P<q>[^\"\\\\]*(\\\\.[^\"\\\\]*)*)\"\
         |^(?P<f>\\d+\\.\\d*)\
         |^(?P<n>\\d+)\
         |^(?P<t>[^\\s()]+)\
@@ -76,24 +99,32 @@ pub fn parse(code: String) -> Result<Vec<S>, String> {
 
     let mut i = 0;
     while i < code.len() {
-        let cap = re_token.captures(&code[i..]).expect("token");
-        // println!("{:?}", cap);
         let mut cur = S::Empty;
+        let cap = re_token.captures(&code[i..]).expect("token");
+        i += cap[0].len();
+        // println!("{:?}", cap);
 
         if cap.name("p").is_some() || cap.name("b").is_some() {
             match &cap[0] {
-                "(" | "[" => stack.push(vec![]),
+                "(" | "[" => {
+                    stack.push(state);
+                    state = ParserState::new(Some(cap[0].chars().nth(0).unwrap()));
+                },
                 ")" => {
-                    let last = stack.pop().unwrap();
-                    if last.is_empty() {
-                        stack.last_mut().unwrap().push(S::Empty);
-                    } else {
-                        stack.last_mut().unwrap().push(S::S(last));
+                    let new = state;
+                    if new.par != Some('(') {
+                        return Err("mismatched parenthesis".to_string())
                     }
+                    state = stack.pop().unwrap();
+                    cur = S::S(new.list);
                 },
                 "]" => {
-                    let last = stack.pop().unwrap();
-                    stack.last_mut().unwrap().push(S::List(last));
+                    let new = state;
+                    if new.par != Some('[') {
+                        return Err("mismatched parenthesis".to_string())
+                    }
+                    state = stack.pop().unwrap();
+                    cur = S::List(new.list);
                 },
                 _ => return Err("unmatched parenthesis".to_string()),
             }
@@ -103,24 +134,26 @@ pub fn parse(code: String) -> Result<Vec<S>, String> {
             cur = S::Int(cap[0].parse::<isize>().unwrap());
         } else if cap.name("q").is_some() {
             cur = S::Str(unescape(&cap["q"]).unwrap());
-        } else if cap.name("qq").is_some() {
-            cur = S::Str(unescape(&cap["qq"]).unwrap());
         } else if cap.name("t").is_some() {
             cur = S::Token(String::from(&cap[0]));
+        } else if cap.name("d").is_some() {
+            state.defer_next = true;
         } else {
             // println!("skip: {:?}", &cap[0])
         }
 
-        i += cap[0].len();
-
         match cur {
             S::Empty => (),
             _ => {
-                // println!("{:?}", cur);
-                stack.last_mut().unwrap().push(cur);
+                if state.defer_next {
+                    state.defer_next = false;
+                    state.list.push(S::Deferred(Box::new(cur)));
+                } else {
+                    state.list.push(cur);
+                }
             },
         }
     }
 
-    return Ok(stack.pop().unwrap())
+    return Ok(state.list)
 }

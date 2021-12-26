@@ -21,9 +21,12 @@ pub enum Value {
     Float(f64),
     Str(String),
     List(List),
+    Deferred(Vec<Value>),
     Addr(Addr),
     Function(Addr),
+    Builtin(Addr),
 }
+
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -35,6 +38,7 @@ pub enum BC {
     CdrA(Addr),
     Call(Addr),
     Debug(usize),
+    Defer(usize),
     Label(Addr),
     LtA(Addr, Addr),
     Jump(Addr),
@@ -42,12 +46,14 @@ pub enum BC {
     Pop(usize),
     Push(Addr),
     PushFn(Addr),
+    PushIns(Addr),
     Return(usize),
 }
 
 use num_traits::FromPrimitive;
 #[derive(Clone, Debug, num_derive::FromPrimitive)]
 pub enum BuiltinFunction {
+    Nop,
     Add,
     Car,
     Cdr,
@@ -62,9 +68,6 @@ impl Value {
     }
     pub fn as_addr(&self) -> &Addr {
         if let Value::Addr(a) = self { a } else { panic!("not an addr: {:?}", self) }
-    }
-    pub fn as_fn_addr(&self) -> &Addr {
-        if let Value::Function(a) = self { a } else { panic!("not function: {:?}", self) }
     }
     pub fn as_list(&self) -> &List {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
@@ -119,10 +122,6 @@ impl Arch {
         return &self.stack[self.fp-1 - i]
     }
 
-    fn push(&mut self, v: Value) {
-        self.stack.push(v);
-    }
-
     fn pop(&mut self, n: usize) {
         self.stack.truncate(self.stack.len() - n);
     }
@@ -133,71 +132,84 @@ impl Arch {
     }
 
     fn add(&mut self) {
-        let a = *self.stack.pop().unwrap().as_int();
-        let b = *self.stack.pop().unwrap().as_int();
+        let a = *self.pop_undefer().as_int();
+        let b = *self.pop_undefer().as_int();
         let ret = Value::Int(a + b);
-        self.push(ret);
+        self.stack.push(ret);
     }
 
     fn lt(&mut self) {
-        let b = *self.stack.pop().unwrap().as_int();
-        let a = *self.stack.pop().unwrap().as_int();
+        let a = *self.pop_undefer().as_int();
+        let b = *self.pop_undefer().as_int();
         let ret = Value::Int((a < b) as isize);
-        self.push(ret);
+        self.stack.push(ret);
     }
 
     fn add_a(&mut self, a: usize, b: usize) {
         let a = self.arg(a).as_int();
         let b = self.arg(b).as_int();
         let ret = Value::Int(a + b);
-        self.push(ret);
+        self.stack.push(ret);
     }
 
     fn lt_a(&mut self, a: usize, b: usize) {
         let a = self.arg(a).as_int();
         let b = self.arg(b).as_int();
         let ret = Value::Int((a < b) as isize);
-        self.push(ret);
+        self.stack.push(ret);
     }
 
     fn car_a(&mut self, list: Addr) {
         let head = self.arg(list).as_list()[0].clone();
-        self.push(head);
+        self.stack.push(head);
     }
 
     fn car(&mut self) {
-        let head = self.stack.pop().unwrap().as_list()[0].clone();
-        self.push(head);
+        let head = self.pop_undefer().as_list()[0].clone();
+        self.stack.push(head);
     }
 
     fn cdr(&mut self) {
-        let mut tail = self.stack.pop().unwrap().as_list_mut();
+        let mut tail = self.pop_undefer().as_list_mut();
         tail.pop_front();
-        self.push(Value::List(tail));
+        self.stack.push(Value::List(tail));
     }
 
     fn cdr_a(&mut self, list: Addr) {
         let mut tail = self.arg(list).as_list().clone();
         tail.pop_front();
-        self.push(Value::List(tail));
+        self.stack.push(Value::List(tail));
+    }
+
+    fn defer(&mut self, count: usize) {
+        let tail = self.stack.split_off(self.stack.len() - count);
+        self.stack.push(Value::Deferred(tail));
     }
 
     fn invoke(&mut self) {
-        let top = self.stack.pop().unwrap();
-        let addr = *top.as_fn_addr();
-        if addr < 1000 {
-            let func = BuiltinFunction::from_usize(addr).unwrap();
-            self.instr(BC::Builtin(func));
-        } else {
-            self.call(addr)
+        match self.pop_undefer() {
+            Value::Function(addr) => self.call(addr),
+            Value::Builtin(addr) => self.instr(BC::Builtin(BuiltinFunction::from_usize(addr).unwrap())),
+
+            other => panic!("not invokable: {:?}", other),
         }
     }
 
     fn jumpz(&mut self, addr: Addr) {
-        let top = self.stack.pop().unwrap();
+        let top = self.pop_undefer();
         if self.is_false(top) {
             self.ip = addr;
         }
+    }
+
+    fn pop_undefer(&mut self) -> Value {
+        let top = self.stack.pop().unwrap();
+        if let Value::Deferred(call) = top {
+            self.stack.extend(call);
+            self.invoke();
+            return self.stack.pop().unwrap();
+        }
+        return top
     }
 
     fn instr(&mut self, instr: BC) {
@@ -205,6 +217,7 @@ impl Arch {
         use BuiltinFunction::*;
 
         match instr {
+            Builtin(Nop)    => (),
             Builtin(Add)    => self.add(),
             Builtin(Car)    => self.car(),
             Builtin(Cdr)    => self.cdr(),
@@ -212,16 +225,18 @@ impl Arch {
             Builtin(Invoke) => self.invoke(),
             Return(argc)    => self.stdreturn(argc),
             AddA(a, b)      => self.add_a(a, b),
-            Arg(a)          => self.push(self.arg(a).clone()),
+            Arg(a)          => self.stack.push(self.arg(a).clone()),
             Call(addr)      => self.call(addr),
             CarA(a)         => self.car_a(a),
             CdrA(a)         => self.cdr_a(a),
             Debug(n)        => self.debug(n),
+            Defer(n)        => self.defer(n),
             Jump(addr)      => self.ip = addr,
             LtA(a, b)       => self.lt_a(a, b),
             Pop(n)          => self.pop(n),
-            Push(v)         => self.push(self.stack[v].clone()),
-            PushFn(addr)    => self.push(Value::Function(addr)),
+            Push(v)         => self.stack.push(self.stack[v].clone()),
+            PushFn(addr)    => self.stack.push(Value::Function(addr)),
+            PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
             JumpZ(addr)     => self.jumpz(addr),
             Label(_)        => (),
         }
@@ -230,8 +245,8 @@ impl Arch {
     fn exec(&mut self, program: &[BC]) {
         while self.ip < program.len() {
             let instr = &program[self.ip];
-            self.ip += 1;
             // println!("ip: {} {:?} {:?}", self.ip, instr, self);
+            self.ip += 1;
             self.instr(instr.clone());
         }
     }
@@ -249,7 +264,7 @@ pub fn link(program: &mut [BC]) {
             BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
             BC::JumpZ(index)    => *instr = BC::JumpZ(map_label_addr[index]),
             BC::Call(index)     => *instr = BC::Call(map_label_addr[index]),
-            BC::PushFn(index)   => *instr = BC::PushFn(if *index < 1000 { *index } else { map_label_addr[index]}),
+            BC::PushFn(index)   => *instr = BC::PushFn(map_label_addr[index]),
             _ => ()
         }
     }
