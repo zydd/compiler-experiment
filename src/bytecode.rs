@@ -15,7 +15,7 @@ struct Arch {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Int(isize),
     Float(f64),
@@ -54,11 +54,22 @@ use num_traits::FromPrimitive;
 #[derive(Clone, Debug, num_derive::FromPrimitive)]
 pub enum BuiltinFunction {
     Nop,
+    Invoke,
+
     Add,
+    Div,
+    Mul,
+    Sub,
+
+    Eq,
+    Geq,
+    Gt,
+    Leq,
+    Lt,
+    Neq,
+
     Car,
     Cdr,
-    Invoke,
-    Lt,
 }
 
 
@@ -77,8 +88,61 @@ impl Value {
     }
 }
 
+macro_rules! value_trait {
+    ($trait: ident, $func: ident) => {
+        impl std::ops::$trait<Value> for Value {
+            type Output = Value;
+            fn $func(self, rhs: Self) -> Self {
+                use Value::*;
+                match (&self, &rhs) {
+                    (Int(a), Int(b)) => Int(a.$func(b)),
+                    (Float(a), Float(b)) => Float(a.$func(b)),
+                    _ => panic!("unsupported operation \"{}\" between {:?} and {:?}", stringify!($func), self, rhs),
+                }
+            }
+        }
+    };
+}
+
+value_trait!(Add, add);
+value_trait!(Sub, sub);
+value_trait!(Mul, mul);
+value_trait!(Div, div);
+
+impl std::cmp::PartialOrd for Value {
+    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
+        use Value::*;
+        match (self, rhs) {
+            (Int(a), Int(b)) => a.partial_cmp(b),
+            (Float(a), Float(b)) => a.partial_cmp(b),
+            _ => None,
+        }
+    }
+}
+
+macro_rules! builtin {
+    ($func_name:ident, $function:expr) => {
+        fn $func_name(&mut self) {
+            let a = self.pop_undefer();
+            let b = self.pop_undefer();
+            let ret = $function(a, b);
+            self.stack.push(ret);
+        }
+    };
+}
 
 impl Arch {
+    builtin!(add, |a, b| a + b);
+    builtin!(div, |a, b| a / b);
+    builtin!(mul, |a, b| a * b);
+    builtin!(sub, |a, b| a - b);
+    builtin!(lt,  |a, b| Value::Int((a <  b) as isize));
+    builtin!(leq, |a, b| Value::Int((a <= b) as isize));
+    builtin!(gt,  |a, b| Value::Int((a >  b) as isize));
+    builtin!(geq, |a, b| Value::Int((a >= b) as isize));
+    builtin!(eq,  |a, b| Value::Int((a == b) as isize));
+    builtin!(neq, |a, b| Value::Int((a != b) as isize));
+
     fn new(data: Vec<Value>) -> Arch {
         let new = Arch{
             ip: 0,
@@ -133,20 +197,6 @@ impl Arch {
     fn debug(&mut self, n: usize) {
         let i = std::cmp::max(0, self.stack.len() as isize - n as isize) as usize;
         println!("ip: {} fp: {} stack: [{}..] {:?}", self.ip, self.fp, i, &self.stack[i..])
-    }
-
-    fn add(&mut self) {
-        let a = *self.pop_undefer().as_int();
-        let b = *self.pop_undefer().as_int();
-        let ret = Value::Int(a + b);
-        self.stack.push(ret);
-    }
-
-    fn lt(&mut self) {
-        let a = *self.pop_undefer().as_int();
-        let b = *self.pop_undefer().as_int();
-        let ret = Value::Int((a < b) as isize);
-        self.stack.push(ret);
     }
 
     fn add_a(&mut self, a: usize, b: usize) {
@@ -222,11 +272,19 @@ impl Arch {
 
         match instr {
             Builtin(Nop)    => (),
+            Builtin(Invoke) => self.invoke(),
             Builtin(Add)    => self.add(),
+            Builtin(Div)    => self.div(),
+            Builtin(Mul)    => self.mul(),
+            Builtin(Sub)    => self.sub(),
+            Builtin(Eq)     => self.eq(),
+            Builtin(Leq)    => self.leq(),
+            Builtin(Lt)     => self.lt(),
+            Builtin(Geq)    => self.geq(),
+            Builtin(Gt)     => self.gt(),
+            Builtin(Neq)    => self.neq(),
             Builtin(Car)    => self.car(),
             Builtin(Cdr)    => self.cdr(),
-            Builtin(Lt)     => self.lt(),
-            Builtin(Invoke) => self.invoke(),
             Return(argc)    => self.stdreturn(argc),
             AddA(a, b)      => self.add_a(a, b),
             Arg(a)          => self.stack.push(self.arg(a).clone()),

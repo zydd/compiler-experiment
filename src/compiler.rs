@@ -27,16 +27,35 @@ impl Context {
             data: Vec::new(),
             scope: vec![HashMap::new()],
         };
-        new.set("+".to_string(), CodeGen::Builtin(BuiltinFunction::Add));
-        new.set("<".to_string(), CodeGen::Builtin(BuiltinFunction::Lt));
-        new.set("car".to_string(), CodeGen::Builtin(BuiltinFunction::Car));
-        new.set("cdr".to_string(), CodeGen::Builtin(BuiltinFunction::Cdr));
-        new.set("__builtin_add".to_string(), CodeGen::Builtin(BuiltinFunction::Add));
-        new.set("__builtin_head".to_string(), CodeGen::Builtin(BuiltinFunction::Car));
-        new.set("__builtin_lt".to_string(), CodeGen::Builtin(BuiltinFunction::Lt));
-        new.set("__builtin_invoke".to_string(), CodeGen::Builtin(BuiltinFunction::Invoke));
-        new.set("__builtin_nop".to_string(), CodeGen::Builtin(BuiltinFunction::Nop));
-        new.set("__builtin_tail".to_string(), CodeGen::Builtin(BuiltinFunction::Cdr));
+
+        macro_rules! builtin {
+            ($instr: ident, $func: literal) => {
+                new.set($func.to_string(), CodeGen::Builtin(BuiltinFunction::$instr));
+                new.set(concat!("__builtin_", stringify!($instr)).to_string(), CodeGen::Builtin(BuiltinFunction::$instr));
+            };
+            ( $instr: ident) => {
+                new.set(concat!("__builtin_", stringify!($instr)).to_string(), CodeGen::Builtin(BuiltinFunction::$instr));
+            };
+        }
+
+        builtin!(Nop);
+        builtin!(Invoke);
+
+        builtin!(Add, "+");
+        builtin!(Div, "/");
+        builtin!(Mul, "*");
+        builtin!(Sub, "-");
+
+        builtin!(Eq,  "==");
+        builtin!(Geq, ">=");
+        builtin!(Gt,  ">");
+        builtin!(Leq, "<=");
+        builtin!(Lt,  "<");
+        builtin!(Neq, "!=");
+
+        builtin!(Car, "car");
+        builtin!(Cdr, "cdr");
+
         return new
     }
 

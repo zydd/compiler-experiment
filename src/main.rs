@@ -61,10 +61,10 @@ fn main() {
 
     let mut ast = ast;
     let mut comp = compiler::compile(&mut ast);
-    println!("{:?}", comp);
+    println!("{:?}", comp.1);
+    println!("{:?}", comp.0);
 
     bytecode::link(&mut comp.0);
-    println!("{:?}", comp);
 
     bytecode::execute(&comp.0, comp.1);
 }
