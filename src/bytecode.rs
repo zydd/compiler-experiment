@@ -66,7 +66,7 @@ impl Value {
     pub fn as_int(&self) -> &isize {
         if let Value::Int(n) = self { n } else { panic!("not an int: {:?}", self) }
     }
-    pub fn as_addr(&self) -> &Addr {
+    pub fn as_addr(self) -> Addr {
         if let Value::Addr(a) = self { a } else { panic!("not an addr: {:?}", self) }
     }
     pub fn as_list(&self) -> &List {
@@ -99,23 +99,27 @@ impl Arch {
     }
 
     fn stdreturn(&mut self, argc: usize) {
-        let raddr   = *self.stack[self.fp + 0].as_addr();
-        let framep  = *self.stack[self.fp + 1].as_addr();
+        assert_eq!(self.stack.len(), self.fp + 3);
+
         let ret     = self.stack.pop().unwrap();
+        let framep  = self.stack.pop().unwrap().as_addr();
+        let raddr   = self.stack.pop().unwrap().as_addr();
+
         self.stack.truncate(self.fp - argc);
         self.stack.push(ret);
-        // println!("frame: {} -> {}", self.fp, frame);
+
         self.fp = framep;
         self.ip = raddr;
     }
 
     fn call(&mut self, addr: Addr) {
-        let fp = self.fp;
-        self.fp = self.stack.len();
+        let frame = self.stack.len();
+
         self.stack.push(Value::Addr(self.ip)); // return addr (fp+0)
-        self.stack.push(Value::Addr(fp)); // previous frame (fp+1)
+        self.stack.push(Value::Addr(self.fp)); // previous frame (fp+1)
 
         self.ip = addr;
+        self.fp = frame;
     }
 
     fn arg(&self, i: Addr) -> &Value {

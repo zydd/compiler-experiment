@@ -31,8 +31,12 @@ impl Context {
         new.set("<".to_string(), CodeGen::Builtin(BuiltinFunction::Lt));
         new.set("car".to_string(), CodeGen::Builtin(BuiltinFunction::Car));
         new.set("cdr".to_string(), CodeGen::Builtin(BuiltinFunction::Cdr));
+        new.set("__builtin_add".to_string(), CodeGen::Builtin(BuiltinFunction::Add));
+        new.set("__builtin_head".to_string(), CodeGen::Builtin(BuiltinFunction::Car));
+        new.set("__builtin_lt".to_string(), CodeGen::Builtin(BuiltinFunction::Lt));
         new.set("__builtin_invoke".to_string(), CodeGen::Builtin(BuiltinFunction::Invoke));
         new.set("__builtin_nop".to_string(), CodeGen::Builtin(BuiltinFunction::Nop));
+        new.set("__builtin_tail".to_string(), CodeGen::Builtin(BuiltinFunction::Cdr));
         return new
     }
 
