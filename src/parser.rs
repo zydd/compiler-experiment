@@ -94,7 +94,7 @@ pub fn parse(code: String) -> Result<Vec<S>, String> {
         |^\"(?P<q>[^\"\\\\]*(\\\\.[^\"\\\\]*)*)\"\
         |^(?P<f>\\d+\\.\\d*)\
         |^(?P<n>\\d+)\
-        |^(?P<t>[^\\s()]+)\
+        |^(?P<t>[^\\s()\\[\\]]+)\
         ").unwrap();
 
     let mut i = 0;
