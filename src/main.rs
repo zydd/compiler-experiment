@@ -66,7 +66,7 @@ fn main() {
 
     bytecode::link(&mut comp.0);
 
-    const STACK_SIZE: usize = 512 * 1024 * 1024;
+    const STACK_SIZE: usize = 1024 * 1024 * 1024;
     let thread = std::thread::Builder::new()
         .name("interpreter".to_string())
         .stack_size(STACK_SIZE)
