@@ -85,6 +85,9 @@ impl Value {
     pub fn as_list_mut(self) -> List {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
     }
+    pub fn as_deferred(self) -> Vec<Value> {
+        if let Value::Deferred(a) = self { a } else { panic!("not a deferred value: {:?}", self) }
+    }
 }
 
 macro_rules! value_trait {
@@ -235,21 +238,6 @@ impl Arch {
         self.stack.push(Value::List(tail));
     }
 
-    fn defer(&mut self, count: usize) {
-        let tail = self.stack.split_off(self.stack.len() - count);
-        self.stack.push(Value::Deferred(tail));
-    }
-
-    fn undefer(&mut self) {
-        let top = self.stack.pop().unwrap();
-        if let Value::Deferred(call) = top {
-            self.stack.extend(call);
-            self.invoke();
-        } else {
-            panic!("not a deferred value: {:?}", top);
-        }
-    }
-
     fn invoke(&mut self) {
         match self.pop_undefer() {
             Value::Function(addr) => self.call(addr),
@@ -266,13 +254,26 @@ impl Arch {
         }
     }
 
+    fn defer(&mut self, count: usize) {
+        let tail = self.stack.split_off(self.stack.len() - count);
+        self.stack.push(Value::Deferred(tail));
+    }
+
+    fn undefer(&mut self) {
+        while let Value::Deferred(_) = self.stack.last().unwrap() {
+            let call = self.stack.pop().unwrap().as_deferred();
+            self.stack.extend(call);
+            self.invoke();
+        }
+    }
+
     fn pop_undefer(&mut self) -> Value {
-        let top = self.stack.pop().unwrap();
-        if let Value::Deferred(call) = top {
+        let mut top = self.stack.pop().unwrap();
+        while let Value::Deferred(call) = top {
             self.stack.extend(call);
             self.invoke();
 
-            return self.stack.pop().unwrap();
+            top = self.stack.pop().unwrap();
         }
         return top
     }
