@@ -39,7 +39,9 @@ impl Context {
         }
 
         builtin!(Nop);
+        builtin!(Except);
         builtin!(Invoke);
+        builtin!(Undefer);
 
         builtin!(Add, "+");
         builtin!(Div, "/");
@@ -110,14 +112,19 @@ impl CodeGen {
 }
 
 
-impl From<&S> for Value {
-    fn from(s: &S) -> Self {
+impl TryFrom<&S> for Value {
+    type Error = String;
+    fn try_from(s: &S) -> Result<Self, Self::Error> {
         match s {
-            S::Int(n)       => Value::Int(n.clone()),
-            S::Float(n)     => Value::Float(n.clone()),
-            S::Str(s)       => Value::Str(s.clone()),
-            S::List(list)   => Value::List(list.iter().map(|x| Value::from(x)).collect()),
-            _ => panic!("unimplemented type conversion"),
+            S::Int(n)       => Ok(Value::Int(n.clone())),
+            S::Float(n)     => Ok(Value::Float(n.clone())),
+            S::Str(s)       => Ok(Value::Str(s.clone())),
+            S::List(list)   =>
+                match list.iter().map(|x| Value::try_from(x)).collect() {
+                    Ok(conv_list) => Ok(Value::List(conv_list)),
+                    Err(err) => Err(err)
+                },
+            _ => Err("unimplemented type conversion".to_string()),
         }
     }
 }
@@ -125,61 +132,60 @@ impl From<&S> for Value {
 
 fn compile_function(ctx: &mut Context, expr: &S) -> Vec<BC> {
     let expr = expr.as_expr();
+
+    assert_eq!(expr.len() % 2, 1); // 1 + (args, body) pairs
+
     let name = expr[1].as_expr()[0].as_token();
-    let args = expr[1].as_expr().iter().skip(1).map(|x| x.as_token().clone());
-    let argc = args.len();
-    let body = expr[2].clone();
+    let argc = expr[1].as_expr().len() - 1;
     let mut out = Vec::new();
 
     let label = ctx.new_label();
-
-    ctx.set(name.clone(), CodeGen::Fn(label));
-    ctx.enter();
-
-    for (i, arg) in args.enumerate() {
-        ctx.set(arg, CodeGen::Arg(i));
-    }
-
-    let after = ctx.new_label();
+    let fn_end = ctx.new_label();
     out.extend([
-        BC::Jump(after),
+        BC::Jump(fn_end),
         BC::Label(label),
     ]);
-    out.extend(body.compile(ctx));
-    out.extend([
-        BC::Return(argc),
-        BC::Label(after),
-    ]);
 
-    ctx.exit();
+    ctx.set(name.clone(), CodeGen::Fn(label));
 
-    return out
-}
+    for def in expr[1..].chunks(2) {
+        assert_eq!(def[0].as_expr().len(), argc + 1);
+        assert_eq!(def[0].as_expr()[0].as_token(), name);
 
-fn compile_if(ctx: &mut Context, expr: &S) -> Vec<BC> {
-    let expr = expr.as_expr();
-    let condition = &expr[1];
-    let true_case = &expr[2];
-    let false_case = &expr[3];
+        let case_end = ctx.new_label();
+        ctx.enter();
 
-    let mut out = Vec::new();
+        for (i, arg) in def[0].as_expr().iter().skip(1).enumerate() {
+            match arg {
+                S::Token(argname) => if argname != "_" {
+                    ctx.set(argname.clone(), CodeGen::Arg(i))
+                },
+                other => {
+                    let addr = ctx.data.len();
+                    ctx.data.push(Value::try_from(other).unwrap());
 
-    let label_else = ctx.new_label();
-    let label_end = ctx.new_label();
+                    out.extend([
+                        BC::Push(addr),
+                        BC::Arg(i),
+                        BC::Builtin(BuiltinFunction::Eq),
+                        BC::JumpZ(case_end),
+                    ]);
+                },
+            }
+        }
 
-    out.extend(condition.compile(ctx));
-    out.extend([
-        BC::JumpZ(label_else)
-    ]);
-    out.extend(true_case.compile(ctx));
-    out.extend([
-        BC::Jump(label_end),
-        BC::Label(label_else),
-    ]);
-    out.extend(false_case.compile(ctx));
-    out.extend([
-        BC::Label(label_end),
-    ]);
+        out.extend(def[1].compile(ctx));
+        out.extend([
+            BC::Return(argc),
+            BC::Label(case_end)
+        ]);
+
+        ctx.exit();
+    }
+
+    out.push(BC::Builtin(BuiltinFunction::Except));
+    out.push(BC::Label(fn_end));
+
     return out
 }
 
@@ -216,7 +222,6 @@ impl S {
                 } else if let S::Token(name) = &expr[0] {
                     match name.as_str() {
                         "def"   => out.extend(compile_function(ctx, self)),
-                        "if"    => out.extend(compile_if(ctx, self)),
                         _       => out.extend(compile_call(ctx, expr, false)),
                     }
                 } else {
@@ -240,11 +245,11 @@ impl S {
             },
             S::List(_) => {
                 let addr = ctx.data.len();
-                ctx.data.push(Value::from(self));
+                ctx.data.push(Value::try_from(self).unwrap());
                 out.push(BC::Push(addr));
             },
             S::Token(name) => {
-                out.extend(ctx.get(name).unwrap().value());
+                out.extend(ctx.get(name).unwrap_or_else(|| panic!("could not find name '{}'", name)).value());
             },
             S::Deferred(expr) => {
                 out.extend(compile_call(ctx, expr.as_expr(), true));

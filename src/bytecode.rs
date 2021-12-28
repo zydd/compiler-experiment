@@ -11,6 +11,7 @@ pub type List = VecDeque<Value>;
 struct Arch {
     ip: Addr,
     fp: Addr,
+    prog: Vec<BC>,
     stack: Vec<Value>,
 }
 
@@ -22,7 +23,6 @@ pub enum Value {
     Str(String),
     List(List),
     Deferred(Vec<Value>),
-    Addr(Addr),
     Function(Addr),
     Builtin(Addr),
 }
@@ -54,7 +54,9 @@ use num_traits::FromPrimitive;
 #[derive(Clone, Debug, num_derive::FromPrimitive)]
 pub enum BuiltinFunction {
     Nop,
+    Except,
     Invoke,
+    Undefer,
 
     Add,
     Div,
@@ -76,9 +78,6 @@ pub enum BuiltinFunction {
 impl Value {
     pub fn as_int(&self) -> &isize {
         if let Value::Int(n) = self { n } else { panic!("not an int: {:?}", self) }
-    }
-    pub fn as_addr(self) -> Addr {
-        if let Value::Addr(a) = self { a } else { panic!("not an addr: {:?}", self) }
     }
     pub fn as_list(&self) -> &List {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
@@ -143,10 +142,11 @@ impl Arch {
     builtin!(eq,  |a, b| Value::Int((a == b) as isize));
     builtin!(neq, |a, b| Value::Int((a != b) as isize));
 
-    fn new(data: Vec<Value>) -> Arch {
+    fn new(prog: Vec<BC>, data: Vec<Value>) -> Arch {
         let new = Arch{
             ip: 0,
             fp: data.len(),
+            prog: prog,
             stack: data,
         };
 
@@ -163,27 +163,27 @@ impl Arch {
     }
 
     fn stdreturn(&mut self, argc: usize) {
-        assert_eq!(self.stack.len(), self.fp + 3);
+        assert_eq!(self.stack.len(), self.fp + 1);
 
-        let ret     = self.stack.pop().unwrap();
-        let framep  = self.stack.pop().unwrap().as_addr();
-        let raddr   = self.stack.pop().unwrap().as_addr();
+        let ret = self.stack.pop().unwrap();
 
         self.stack.truncate(self.fp - argc);
         self.stack.push(ret);
-
-        self.fp = framep;
-        self.ip = raddr;
     }
 
     fn call(&mut self, addr: Addr) {
         let frame = self.stack.len();
 
-        self.stack.push(Value::Addr(self.ip)); // return addr (fp+0)
-        self.stack.push(Value::Addr(self.fp)); // previous frame (fp+1)
+        let ip = self.ip;
+        let fp = self.fp;
 
         self.ip = addr;
         self.fp = frame;
+
+        self.exec();
+
+        self.ip = ip;
+        self.fp = fp;
     }
 
     fn arg(&self, i: Addr) -> &Value {
@@ -196,7 +196,7 @@ impl Arch {
 
     fn debug(&mut self, n: usize) {
         let i = std::cmp::max(0, self.stack.len() as isize - n as isize) as usize;
-        println!("ip: {} fp: {} stack: [{}..] {:?}", self.ip, self.fp, i, &self.stack[i..])
+        println!("Debug: ip: {} fp: {} stack: [{}..] {:?}", self.ip, self.fp, i, &self.stack[i..])
     }
 
     fn add_a(&mut self, a: usize, b: usize) {
@@ -240,10 +240,20 @@ impl Arch {
         self.stack.push(Value::Deferred(tail));
     }
 
+    fn undefer(&mut self) {
+        let top = self.stack.pop().unwrap();
+        if let Value::Deferred(call) = top {
+            self.stack.extend(call);
+            self.invoke();
+        } else {
+            panic!("not a deferred value: {:?}", top);
+        }
+    }
+
     fn invoke(&mut self) {
         match self.pop_undefer() {
             Value::Function(addr) => self.call(addr),
-            Value::Builtin(addr) => self.instr(BC::Builtin(BuiltinFunction::from_usize(addr).unwrap())),
+            Value::Builtin(addr) => self.builtin(BuiltinFunction::from_usize(addr).unwrap()),
 
             other => panic!("not invokable: {:?}", other),
         }
@@ -261,55 +271,63 @@ impl Arch {
         if let Value::Deferred(call) = top {
             self.stack.extend(call);
             self.invoke();
+
             return self.stack.pop().unwrap();
         }
         return top
     }
 
-    fn instr(&mut self, instr: BC) {
-        use BC::*;
+    fn builtin(&mut self, func: BuiltinFunction) {
         use BuiltinFunction::*;
-
-        match instr {
-            Builtin(Nop)    => (),
-            Builtin(Invoke) => self.invoke(),
-            Builtin(Add)    => self.add(),
-            Builtin(Div)    => self.div(),
-            Builtin(Mul)    => self.mul(),
-            Builtin(Sub)    => self.sub(),
-            Builtin(Eq)     => self.eq(),
-            Builtin(Leq)    => self.leq(),
-            Builtin(Lt)     => self.lt(),
-            Builtin(Geq)    => self.geq(),
-            Builtin(Gt)     => self.gt(),
-            Builtin(Neq)    => self.neq(),
-            Builtin(Car)    => self.car(),
-            Builtin(Cdr)    => self.cdr(),
-            Return(argc)    => self.stdreturn(argc),
-            AddA(a, b)      => self.add_a(a, b),
-            Arg(a)          => self.stack.push(self.arg(a).clone()),
-            Call(addr)      => self.call(addr),
-            CarA(a)         => self.car_a(a),
-            CdrA(a)         => self.cdr_a(a),
-            Debug(n)        => self.debug(n),
-            Defer(n)        => self.defer(n),
-            Jump(addr)      => self.ip = addr,
-            LtA(a, b)       => self.lt_a(a, b),
-            Pop(n)          => self.pop(n),
-            Push(v)         => self.stack.push(self.stack[v].clone()),
-            PushFn(addr)    => self.stack.push(Value::Function(addr)),
-            PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
-            JumpZ(addr)     => self.jumpz(addr),
-            Label(_)        => (),
+        match func {
+            Nop     => (),
+            Except  => panic!("Builtin(Except) at {}", self.ip-1),
+            Invoke  => self.invoke(),
+            Undefer => self.undefer(),
+            Add     => self.add(),
+            Div     => self.div(),
+            Mul     => self.mul(),
+            Sub     => self.sub(),
+            Eq      => self.eq(),
+            Leq     => self.leq(),
+            Lt      => self.lt(),
+            Geq     => self.geq(),
+            Gt      => self.gt(),
+            Neq     => self.neq(),
+            Car     => self.car(),
+            Cdr     => self.cdr(),
         }
     }
 
-    fn exec(&mut self, program: &[BC]) {
-        while self.ip < program.len() {
-            let instr = &program[self.ip];
+    fn exec(&mut self) {
+        while self.ip < self.prog.len() {
+            let instr = self.prog[self.ip].clone();
             // println!("ip: {} {:?} {:?}", self.ip, instr, self);
             self.ip += 1;
-            self.instr(instr.clone());
+
+            use BC::*;
+            match instr {
+                Builtin(func)   => self.builtin(func),
+                AddA(a, b)      => self.add_a(a, b),
+                Arg(a)          => self.stack.push(self.arg(a).clone()),
+                Call(addr)      => self.call(addr),
+                CarA(a)         => self.car_a(a),
+                CdrA(a)         => self.cdr_a(a),
+                Debug(n)        => self.debug(n),
+                Defer(n)        => self.defer(n),
+                Jump(addr)      => self.ip = addr,
+                JumpZ(addr)     => self.jumpz(addr),
+                Label(_)        => (),
+                LtA(a, b)       => self.lt_a(a, b),
+                Pop(n)          => self.pop(n),
+                Push(v)         => self.stack.push(self.stack[v].clone()),
+                PushFn(addr)    => self.stack.push(Value::Function(addr)),
+                PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
+                Return(argc)    => {
+                    self.stdreturn(argc);
+                    break;
+                },
+            }
         }
     }
 }
@@ -332,11 +350,11 @@ pub fn link(program: &mut [BC]) {
     }
 }
 
-pub fn execute(prog: &[BC], data: Vec<Value>) {
+pub fn execute(prog: Vec<BC>, data: Vec<Value>) {
     let sp = data.len();
-    let mut arch = Arch::new(data);
+    let mut arch = Arch::new(prog, data);
     println!("{:?}", arch);
-    arch.exec(&prog);
+    arch.exec();
     println!("{:?}", arch);
     println!("{:?}", &arch.stack[sp..]);
 }

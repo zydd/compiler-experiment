@@ -32,12 +32,12 @@ impl S {
         if let S::Int(n) = self { n } else { panic!("not an int: {:?}", self) }
     }
 
-    // fn is_atom(&self) -> bool {
-    //     match self {
-    //         S::Int(_) | S::Str(_) | S::Empty => true,
-    //         _ => false
-    //     }
-    // }
+    fn is_literal(&self) -> bool {
+        match self {
+            S::Int(_) | S::Float(_) | S::Str(_) => true,
+            _ => false
+        }
+    }
 }
 
 impl std::fmt::Display for S {

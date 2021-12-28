@@ -66,5 +66,12 @@ fn main() {
 
     bytecode::link(&mut comp.0);
 
-    bytecode::execute(&comp.0, comp.1);
+    const STACK_SIZE: usize = 512 * 1024 * 1024;
+    let thread = std::thread::Builder::new()
+        .name("interpreter".to_string())
+        .stack_size(STACK_SIZE)
+        .spawn(|| bytecode::execute(comp.0, comp.1))
+        .unwrap();
+
+    thread.join().unwrap_or(());
 }
