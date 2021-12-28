@@ -228,6 +228,16 @@ impl S {
                 ctx.data.push(Value::Int(n.clone()));
                 out.push(BC::Push(addr));
             },
+            S::Float(n) => {
+                let addr = ctx.data.len();
+                ctx.data.push(Value::Float(n.clone()));
+                out.push(BC::Push(addr));
+            },
+            S::Str(n) => {
+                let addr = ctx.data.len();
+                ctx.data.push(Value::Str(n.clone()));
+                out.push(BC::Push(addr));
+            },
             S::List(_) => {
                 let addr = ctx.data.len();
                 ctx.data.push(Value::from(self));
@@ -240,7 +250,7 @@ impl S {
                 out.extend(compile_call(ctx, expr.as_expr(), true));
             },
             _ => {
-                panic!("unimplemented")
+                panic!("unimplemented: {}", self)
             }
         }
         return out
