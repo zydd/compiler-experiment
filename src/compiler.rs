@@ -222,10 +222,8 @@ impl Function {
         // assert_eq!(argc, func.function().unwrap().arity);
 
         for el in expr.iter().skip(1).rev() {
-            println!("Push arg {:?}", el);
             args.extend(el.compile(ctx));
         }
-        println!("args {:?}", args);
 
         out.extend(args);
 
@@ -292,7 +290,6 @@ impl S {
                             ctx.set(func.name.clone(), CodeGen::Fn(func));
                         },
                         _ => {
-                            println!("compile call: {}", self);
                             let func = ctx.get(name).unwrap();
                             out.extend(func.invoke(ctx, expr));
                         },
@@ -358,8 +355,6 @@ pub fn compile(ast: &mut [S]) -> (Vec<BC>, Vec<Value>) {
     for el in ast {
         out.extend(el.compile(&mut ctx));
     }
-
-    println!("compiler ctx: {:?}", ctx.scope[0].keys());
 
     return (out, ctx.data)
 }

@@ -61,8 +61,7 @@ fn main() {
 
     let mut ast = ast;
     let mut comp = compiler::compile(&mut ast);
-    println!("{:?}", comp.1);
-    println!("{:?}", comp.0);
+    println!("\n{:?}\n", comp.0);
 
     bytecode::link(&mut comp.0);
 

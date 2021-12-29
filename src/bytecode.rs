@@ -350,14 +350,19 @@ impl Arch {
     }
 }
 
-pub fn link(program: &mut [BC]) {
+pub fn link(program: &mut Vec<BC>) {
     let mut map_label_addr: HashMap<Addr, Addr> = HashMap::new();
-    for (addr, instr) in program.iter().enumerate() {
-        if let BC::Label(index) = instr {
-            map_label_addr.insert(*index, addr);
+    let mut addr = 0;
+    for i in 0..program.len() {
+        if let BC::Label(index) = program[i] {
+            map_label_addr.insert(index, addr);
+        } else {
+            program[addr] = program[i].clone();
+            addr += 1;
         }
     }
-    for (_, instr) in program.iter_mut().enumerate() {
+    program.truncate(addr);
+    for instr in program {
         match instr {
             BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
             BC::JumpZ(index)    => *instr = BC::JumpZ(map_label_addr[index]),
@@ -370,7 +375,6 @@ pub fn link(program: &mut [BC]) {
 
 pub fn execute(prog: Vec<BC>, data: Vec<Value>) {
     let mut arch = Arch::new(prog, data);
-    println!("{:?}", arch);
     arch.exec();
     println!("{:?}", arch);
 }
