@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use num_traits::FromPrimitive;
 
 use crate::parser::*;
 use crate::bytecode::*;
@@ -6,17 +7,28 @@ use crate::bytecode::*;
 type Label = usize;
 
 
+#[derive(Debug)]
 enum CodeGen {
     Arg(usize),
-    Fn(usize),
-    Builtin(BuiltinFunction),
+    Fn(Function),
+    // Builtin(BuiltinFunction),
+}
+
+
+#[derive(Clone, Debug)]
+struct Function {
+    label: usize,
+    name: String,
+    builtin: bool,
+    code: Vec<BC>,
+    arity: usize,
 }
 
 
 struct Context {
     label_index: Label,
     data: Vec<Value>,
-    scope: Vec<HashMap<String, CodeGen>>,
+    scope: Vec<HashMap<String, std::rc::Rc<Box<CodeGen>>>>,
 }
 
 
@@ -29,34 +41,35 @@ impl Context {
         };
 
         macro_rules! builtin {
-            ($instr: ident, $func: literal) => {
-                new.set($func.to_string(), CodeGen::Builtin(BuiltinFunction::$instr));
-                new.set(concat!("__builtin_", stringify!($instr)).to_string(), CodeGen::Builtin(BuiltinFunction::$instr));
+            ($instr: ident, $arity: expr, $func: literal) => {
+                new.set($func.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity)));
+                new.set(concat!("__builtin_", stringify!($instr)).to_string(),  CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity)));
             };
-            ( $instr: ident) => {
-                new.set(concat!("__builtin_", stringify!($instr)).to_string(), CodeGen::Builtin(BuiltinFunction::$instr));
+            ($instr: ident, $arity: expr) => {
+                new.set(concat!("__builtin_", stringify!($instr)).to_string(),  CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity)));
             };
         }
 
-        builtin!(Nop);
-        builtin!(Except);
-        builtin!(Invoke);
-        builtin!(Undefer);
+        builtin!(Nop,       0);
+        builtin!(Except,    0);
+        builtin!(Invoke,    0);
+        builtin!(Pop,       0);
+        builtin!(Undefer,   0);
 
-        builtin!(Add, "+");
-        builtin!(Div, "/");
-        builtin!(Mul, "*");
-        builtin!(Sub, "-");
+        builtin!(Add,   2,  "+");
+        builtin!(Div,   2,  "/");
+        builtin!(Mul,   2,  "*");
+        builtin!(Sub,   2,  "-");
 
-        builtin!(Eq,  "==");
-        builtin!(Geq, ">=");
-        builtin!(Gt,  ">");
-        builtin!(Leq, "<=");
-        builtin!(Lt,  "<");
-        builtin!(Neq, "!=");
+        builtin!(Eq,    2,  "==");
+        builtin!(Geq,   2,  ">=");
+        builtin!(Gt,    2,  ">" );
+        builtin!(Leq,   2,  "<=");
+        builtin!(Lt,    2,  "<" );
+        builtin!(Neq,   2,  "!=");
 
-        builtin!(Car, "car");
-        builtin!(Cdr, "cdr");
+        builtin!(Car,   1,  "car");
+        builtin!(Cdr,   1,  "cdr");
 
         return new
     }
@@ -67,10 +80,10 @@ impl Context {
         return label
     }
 
-    fn get(&self, key: &String) -> Option<&CodeGen> {
+    fn get(&self, key: &String) -> Option<std::rc::Rc<Box<CodeGen>>> {
         for scope in self.scope.iter().rev() {
             if let Some(v) = scope.get(key) {
-                return Some(v)
+                return Some(v.clone())
             }
         }
 
@@ -81,7 +94,7 @@ impl Context {
 
     fn set(&mut self, var: String, code: CodeGen) {
         let current = self.scope.last_mut().unwrap();
-        current.insert(var, code);
+        current.insert(var, std::rc::Rc::new(Box::new(code)));
     }
 
     fn enter(&mut self) {
@@ -97,16 +110,150 @@ impl Context {
 impl CodeGen {
     fn value(&self) -> Vec<BC> {
         match self {
-            CodeGen::Builtin(id)    => vec![BC::PushIns(id.clone() as usize)],
-            CodeGen::Arg(i)         => vec![BC::Arg(*i)],
-            CodeGen::Fn(label)      => vec![BC::PushFn(*label)],
+            CodeGen::Arg(i)         => vec![BC::Arg(i.clone())],
+            CodeGen::Fn(func)       => func.value(),
         }
     }
-    fn invoke(&self) -> Vec<BC> {
+    fn invoke(&self, ctx: &mut Context, expr: &[S]) -> Vec<BC> {
         match self {
-            CodeGen::Builtin(bc)    => vec![BC::Builtin(bc.clone())],
-            CodeGen::Arg(i)         => vec![BC::Arg(*i), BC::Builtin(BuiltinFunction::Invoke)],
-            CodeGen::Fn(label)      => vec![BC::Call(*label)],
+            CodeGen::Arg(i)         => vec![BC::Arg(i.clone()), BC::Builtin(BuiltinFunction::Invoke)],
+            CodeGen::Fn(func)       => func.call(ctx, expr, false)
+        }
+    }
+
+    fn function(&self) -> Option<&Function> {
+        if let CodeGen::Fn(func) = self {
+            return Some(func)
+        } else {
+            panic!("not a function: {:?}", self)
+        }
+    }
+}
+
+
+impl Function {
+    fn builtin(id: BuiltinFunction, arity: usize) -> Function {
+        let new = Function{
+            builtin: true,
+            label: id as usize,
+            name: String::new(),
+            code: Vec::new(),
+            arity: arity,
+        };
+
+        return new
+    }
+
+    fn compile(ctx: &mut Context, expr: &S) -> Function {
+        let expr = expr.as_expr();
+
+        let mut out = Vec::new();
+        let mut func = Function{
+            label: ctx.new_label(),
+            name: expr[1].as_expr()[0].as_token().clone(),
+            code: Vec::new(),
+            arity: expr[1].as_expr().len() - 1,
+            builtin: false,
+        };
+
+        assert_eq!(expr.len() % 2, 1); // 1 + (args, body) pairs
+
+
+        let fn_end = ctx.new_label();
+        out.extend([
+            BC::Jump(fn_end),
+            BC::Label(func.label),
+        ]);
+
+        ctx.enter();
+        ctx.set(func.name.clone(), CodeGen::Fn(func.clone()));
+
+        for def in expr[1..].chunks(2) {
+            assert_eq!(def[0].as_expr().len(), func.arity + 1);
+            assert_eq!(def[0].as_expr()[0].as_token(), &func.name);
+
+            let case_end = ctx.new_label();
+            ctx.enter();
+
+            for (i, arg) in def[0].as_expr().iter().skip(1).enumerate() {
+                match arg {
+                    S::Token(argname) => if argname != "_" {
+                        ctx.set(argname.clone(), CodeGen::Arg(i))
+                    },
+                    other => {
+                        let addr = ctx.data.len();
+                        ctx.data.push(Value::try_from(other).unwrap());
+
+                        out.extend([
+                            BC::Load(addr),
+                            BC::Arg(i),
+                            BC::Builtin(BuiltinFunction::Eq),
+                            BC::JumpZ(case_end),
+                        ]);
+                    },
+                }
+            }
+
+            out.extend(def[1].compile(ctx));
+            out.extend([
+                BC::Return(func.arity),
+                BC::Label(case_end)
+            ]);
+
+            ctx.exit();
+        }
+
+        ctx.exit();
+
+        out.push(BC::Builtin(BuiltinFunction::Except));
+        out.push(BC::Label(fn_end));
+
+        func.code = out;
+        return func
+    }
+
+    fn call(&self, ctx: &mut Context, expr: &[S], deferred: bool) -> Vec<BC> {
+        let name = expr[0].as_token();
+        let func = ctx.get(name).unwrap();
+        let mut out = Vec::new();
+        let mut args = Vec::new();
+        let argc = expr.len() - 1;
+
+        // assert_eq!(argc, func.function().unwrap().arity);
+
+        for el in expr.iter().skip(1).rev() {
+            println!("Push arg {:?}", el);
+            args.extend(el.compile(ctx));
+        }
+        println!("args {:?}", args);
+
+        out.extend(args);
+
+        if deferred {
+            out.extend(func.value());
+            out.push(BC::Defer(expr.len()));
+        } else {
+            let func = func.function().unwrap();
+
+            if self.builtin {
+                out.push(BC::Builtin(BuiltinFunction::from_usize(self.label).unwrap()));
+            } else {
+                out.push(BC::Call(func.label));
+            }
+
+            if argc > func.arity {
+                out.push(BC::ReturnCall(argc - func.arity));
+            }
+        }
+
+        return out
+    }
+
+    fn value(&self) -> Vec<BC> {
+        if self.builtin {
+            return vec![BC::PushIns(self.label)]
+        } else {
+            return vec![BC::PushFn(self.label)]
         }
     }
 }
@@ -130,88 +277,6 @@ impl TryFrom<&S> for Value {
 }
 
 
-fn compile_function(ctx: &mut Context, expr: &S) -> Vec<BC> {
-    let expr = expr.as_expr();
-
-    assert_eq!(expr.len() % 2, 1); // 1 + (args, body) pairs
-
-    let name = expr[1].as_expr()[0].as_token();
-    let argc = expr[1].as_expr().len() - 1;
-    let mut out = Vec::new();
-
-    let label = ctx.new_label();
-    let fn_end = ctx.new_label();
-    out.extend([
-        BC::Jump(fn_end),
-        BC::Label(label),
-    ]);
-
-    ctx.set(name.clone(), CodeGen::Fn(label));
-
-    for def in expr[1..].chunks(2) {
-        assert_eq!(def[0].as_expr().len(), argc + 1);
-        assert_eq!(def[0].as_expr()[0].as_token(), name);
-
-        let case_end = ctx.new_label();
-        ctx.enter();
-
-        for (i, arg) in def[0].as_expr().iter().skip(1).enumerate() {
-            match arg {
-                S::Token(argname) => if argname != "_" {
-                    ctx.set(argname.clone(), CodeGen::Arg(i))
-                },
-                other => {
-                    let addr = ctx.data.len();
-                    ctx.data.push(Value::try_from(other).unwrap());
-
-                    out.extend([
-                        BC::Push(addr),
-                        BC::Arg(i),
-                        BC::Builtin(BuiltinFunction::Eq),
-                        BC::JumpZ(case_end),
-                    ]);
-                },
-            }
-        }
-
-        out.extend(def[1].compile(ctx));
-        out.extend([
-            BC::Return(argc),
-            BC::Label(case_end)
-        ]);
-
-        ctx.exit();
-    }
-
-    out.push(BC::Builtin(BuiltinFunction::Except));
-    out.push(BC::Label(fn_end));
-
-    return out
-}
-
-
-fn compile_call(ctx: &mut Context, expr: &[S], deferred: bool) -> Vec<BC> {
-    let mut out = Vec::new();
-    let name = expr[0].as_token();
-    let mut args = Vec::new();
-
-    for el in expr.iter().skip(1).rev() {
-        args.extend(el.compile(ctx));
-    }
-
-    let func = ctx.get(name).unwrap();
-    out.extend(args);
-    if deferred {
-        out.extend(func.value());
-        out.push(BC::Defer(expr.len()));
-    } else {
-        out.extend(func.invoke());
-    }
-
-    return out
-}
-
-
 impl S {
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
@@ -221,8 +286,16 @@ impl S {
                     out.push(BC::Builtin(BuiltinFunction::Nop));
                 } else if let S::Token(name) = &expr[0] {
                     match name.as_str() {
-                        "def"   => out.extend(compile_function(ctx, self)),
-                        _       => out.extend(compile_call(ctx, expr, false)),
+                        "def" => {
+                            let func = Function::compile(ctx, self);
+                            out.extend(func.code.clone());
+                            ctx.set(func.name.clone(), CodeGen::Fn(func));
+                        },
+                        _ => {
+                            println!("compile call: {}", self);
+                            let func = ctx.get(name).unwrap();
+                            out.extend(func.invoke(ctx, expr));
+                        },
                     }
                 } else {
                     panic!("not a function call: {:?}", expr)
@@ -231,28 +304,42 @@ impl S {
             S::Int(n) => {
                 let addr = ctx.data.len();
                 ctx.data.push(Value::Int(n.clone()));
-                out.push(BC::Push(addr));
+                out.push(BC::Load(addr));
             },
             S::Float(n) => {
                 let addr = ctx.data.len();
                 ctx.data.push(Value::Float(n.clone()));
-                out.push(BC::Push(addr));
+                out.push(BC::Load(addr));
             },
             S::Str(n) => {
                 let addr = ctx.data.len();
                 ctx.data.push(Value::Str(n.clone()));
-                out.push(BC::Push(addr));
+                out.push(BC::Load(addr));
             },
             S::List(_) => {
                 let addr = ctx.data.len();
                 ctx.data.push(Value::try_from(self).unwrap());
-                out.push(BC::Push(addr));
+                out.push(BC::Load(addr));
             },
             S::Token(name) => {
                 out.extend(ctx.get(name).unwrap_or_else(|| panic!("could not find name '{}'", name)).value());
             },
             S::Deferred(expr) => {
-                out.extend(compile_call(ctx, expr.as_expr(), true));
+                if let S::Token(name) = &expr.as_expr()[0] {
+                    match name.as_str() {
+                        "def" => {
+                            let func = Function::compile(ctx, self);
+                            out.extend(func.code.clone());
+                            ctx.set(func.name.clone(), CodeGen::Fn(func));
+                        },
+                        _ => {
+                            let func = ctx.get(name).unwrap();
+                            out.extend(func.function().unwrap().call(ctx, expr.as_expr(), true));
+                        },
+                    }
+                } else {
+                    panic!("not a function call: {:?}", expr)
+                }
             },
             _ => {
                 panic!("unimplemented: {}", self)
@@ -271,5 +358,8 @@ pub fn compile(ast: &mut [S]) -> (Vec<BC>, Vec<Value>) {
     for el in ast {
         out.extend(el.compile(&mut ctx));
     }
+
+    println!("compiler ctx: {:?}", ctx.scope[0].keys());
+
     return (out, ctx.data)
 }

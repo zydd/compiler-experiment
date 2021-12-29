@@ -17,7 +17,7 @@ pub enum S {
 #[allow(dead_code)]
 impl S {
     pub fn as_list(&self) -> &Vec<S> {
-        if let S::List(list) = self { list } else { panic!("not a list: {}", self) }
+        if let S::List(list) = self { list } else { panic!("not a list: {:?}", self) }
     }
     pub fn as_expr(&self) -> &Vec<S> {
         if let S::S(list) = self { list } else { panic!("not an expression") }

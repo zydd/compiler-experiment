@@ -12,6 +12,7 @@ struct Arch {
     ip: Addr,
     fp: Addr,
     prog: Vec<BC>,
+    data: Vec<Value>,
     stack: Vec<Value>,
 }
 
@@ -44,10 +45,11 @@ pub enum BC {
     Jump(Addr),
     JumpZ(Addr),
     Pop(usize),
-    Push(Addr),
+    Load(Addr),
     PushFn(Addr),
     PushIns(Addr),
     Return(usize),
+    ReturnCall(usize),
 }
 
 use num_traits::FromPrimitive;
@@ -56,6 +58,7 @@ pub enum BuiltinFunction {
     Nop,
     Except,
     Invoke,
+    Pop,
     Undefer,
 
     Add,
@@ -74,14 +77,22 @@ pub enum BuiltinFunction {
     Cdr,
 }
 
+macro_rules! enum_as {
+    ($type:ty, $getter:ident, $enum:path) => {
+        pub fn $getter(&self) -> Option<&$type> {
+            if let $enum(n) = self {
+                return Some(n)
+            } else {
+                return None
+            }
+        }
+    };
+}
+
 
 impl Value {
-    pub fn as_int(&self) -> &isize {
-        if let Value::Int(n) = self { n } else { panic!("not an int: {:?}", self) }
-    }
-    pub fn as_list(&self) -> &List {
-        if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
-    }
+    enum_as!(isize, int, Value::Int);
+    enum_as!(VecDeque<Value>, list, Value::List);
     pub fn as_list_mut(self) -> List {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
     }
@@ -148,9 +159,10 @@ impl Arch {
     fn new(prog: Vec<BC>, data: Vec<Value>) -> Arch {
         let new = Arch{
             ip: 0,
-            fp: data.len(),
+            fp: 0,
             prog: prog,
-            stack: data,
+            data: data,
+            stack: Vec::new(),
         };
 
         return new
@@ -166,12 +178,18 @@ impl Arch {
     }
 
     fn stdreturn(&mut self, argc: usize) {
-        assert_eq!(self.stack.len(), self.fp + 1);
-
+        // assert_eq!(self.stack.len(), self.fp + 1);
         let ret = self.stack.pop().unwrap();
 
         self.stack.truncate(self.fp - argc);
         self.stack.push(ret);
+    }
+
+    fn returncall(&mut self, argc: usize) {
+        let stack_len = self.stack.len() - argc;
+        while self.stack.len() != stack_len {
+            self.invoke();
+        }
     }
 
     fn call(&mut self, addr: Addr) {
@@ -203,26 +221,26 @@ impl Arch {
     }
 
     fn add_a(&mut self, a: usize, b: usize) {
-        let a = self.arg(a).as_int();
-        let b = self.arg(b).as_int();
+        let a = self.arg(a).int().unwrap();
+        let b = self.arg(b).int().unwrap();
         let ret = Value::Int(a + b);
         self.stack.push(ret);
     }
 
     fn lt_a(&mut self, a: usize, b: usize) {
-        let a = self.arg(a).as_int();
-        let b = self.arg(b).as_int();
+        let a = self.arg(a).int().unwrap();
+        let b = self.arg(b).int().unwrap();
         let ret = Value::Int((a < b) as isize);
         self.stack.push(ret);
     }
 
     fn car_a(&mut self, list: Addr) {
-        let head = self.arg(list).as_list()[0].clone();
+        let head = self.arg(list).list().unwrap()[0].clone();
         self.stack.push(head);
     }
 
     fn car(&mut self) {
-        let head = self.pop_undefer().as_list()[0].clone();
+        let head = self.pop_undefer().list().unwrap()[0].clone();
         self.stack.push(head);
     }
 
@@ -233,7 +251,7 @@ impl Arch {
     }
 
     fn cdr_a(&mut self, list: Addr) {
-        let mut tail = self.arg(list).as_list().clone();
+        let mut tail = self.arg(list).list().unwrap().clone();
         tail.pop_front();
         self.stack.push(Value::List(tail));
     }
@@ -284,6 +302,7 @@ impl Arch {
             Nop     => (),
             Except  => panic!("Builtin(Except) at {}", self.ip-1),
             Invoke  => self.invoke(),
+            Pop     => self.pop(1),
             Undefer => self.undefer(),
             Add     => self.add(),
             Div     => self.div(),
@@ -303,7 +322,7 @@ impl Arch {
     fn exec(&mut self) {
         while self.ip < self.prog.len() {
             let instr = self.prog[self.ip].clone();
-            // println!("ip: {} {:?} {:?}", self.ip, instr, self);
+            // println!("ip: {} {:?} {:?}", self.ip, instr, self.stack);
             self.ip += 1;
 
             use BC::*;
@@ -321,13 +340,11 @@ impl Arch {
                 Label(_)        => (),
                 LtA(a, b)       => self.lt_a(a, b),
                 Pop(n)          => self.pop(n),
-                Push(v)         => self.stack.push(self.stack[v].clone()),
+                Load(v)         => self.stack.push(self.data[v].clone()),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),
                 PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
-                Return(argc)    => {
-                    self.stdreturn(argc);
-                    break;
-                },
+                Return(argc)    => { self.stdreturn(argc); break; },
+                ReturnCall(argc) => self.returncall(argc),
             }
         }
     }
@@ -352,10 +369,8 @@ pub fn link(program: &mut [BC]) {
 }
 
 pub fn execute(prog: Vec<BC>, data: Vec<Value>) {
-    let sp = data.len();
     let mut arch = Arch::new(prog, data);
     println!("{:?}", arch);
     arch.exec();
     println!("{:?}", arch);
-    println!("{:?}", &arch.stack[sp..]);
 }
