@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::collections::VecDeque;
 
 
 // type SString = smartstring::SmartString::<smartstring::Compact>;
 type Addr = usize;
-pub type List = VecDeque<Value>;
+type Argc = u32;
+pub type List = std::collections::VecDeque<Value>;
 
 
 #[derive(Debug)]
@@ -19,6 +19,7 @@ struct Arch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    Bool(bool),
     Int(isize),
     Float(f64),
     Str(String),
@@ -33,18 +34,18 @@ pub enum Value {
 #[derive(Clone, Debug)]
 pub enum BC {
     Builtin(BuiltinFunction),
-    AddA(Addr, Addr),
+    AddA(Argc, Argc),
     Arg(Addr),
+    Bne(Addr),
     CarA(Addr),
     CdrA(Addr),
     Call(Addr),
     Debug(usize),
     Defer(usize),
     Label(Addr),
-    LtA(Addr, Addr),
+    LtA(Argc, Argc),
     MoveArgs(usize),
     Jump(Addr),
-    JumpZ(Addr),
     Pop(usize),
     Load(Addr),
     PushFn(Addr),
@@ -93,13 +94,17 @@ macro_rules! enum_as {
 
 impl Value {
     enum_as!(isize, int, Value::Int);
-    enum_as!(VecDeque<Value>, list, Value::List);
+    enum_as!(List, list, Value::List);
     pub fn as_list_mut(self) -> List {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
     }
     pub fn as_deferred(self) -> Vec<Value> {
         if let Value::Deferred(a) = self { a } else { panic!("not a deferred value: {:?}", self) }
     }
+}
+
+impl std::convert::From<bool> for Value {
+    fn from(v: bool) -> Self { Value::Bool(v) }
 }
 
 macro_rules! value_trait {
@@ -140,7 +145,7 @@ macro_rules! builtin {
             let a = self.pop_undefer();
             let b = self.pop_undefer();
             let ret = $function(a, b);
-            self.stack.push(ret);
+            self.stack.push(ret.into());
         }
     };
 }
@@ -150,12 +155,12 @@ impl Arch {
     builtin!(div, |a, b| a / b);
     builtin!(mul, |a, b| a * b);
     builtin!(sub, |a, b| a - b);
-    builtin!(lt,  |a, b| Value::Int((a <  b) as isize));
-    builtin!(leq, |a, b| Value::Int((a <= b) as isize));
-    builtin!(gt,  |a, b| Value::Int((a >  b) as isize));
-    builtin!(geq, |a, b| Value::Int((a >= b) as isize));
-    builtin!(eq,  |a, b| Value::Int((a == b) as isize));
-    builtin!(neq, |a, b| Value::Int((a != b) as isize));
+    builtin!(lt,  |a, b| a <  b);
+    builtin!(leq, |a, b| a <= b);
+    builtin!(gt,  |a, b| a >  b);
+    builtin!(geq, |a, b| a >= b);
+    builtin!(eq,  |a, b| a == b);
+    builtin!(neq, |a, b| a != b);
 
     fn new(prog: Vec<BC>, data: Vec<Value>) -> Arch {
         let new = Arch{
@@ -167,15 +172,6 @@ impl Arch {
         };
 
         return new
-    }
-
-    fn is_false(&self, v: Value) -> bool {
-        use Value::*;
-        match v {
-            Int(n)      => n == 0,
-            List(list)  => list.is_empty(),
-            _           => panic!("invalid test: {:?}", v)
-        }
     }
 
     fn stdreturn(&mut self, argc: usize) {
@@ -252,13 +248,15 @@ impl Arch {
 
     fn cdr(&mut self) {
         let mut tail = self.pop_undefer().as_list_mut();
-        tail.pop_front();
+        // tail.pop_front();
+        tail.remove(0);
         self.stack.push(Value::List(tail));
     }
 
     fn cdr_a(&mut self, list: Addr) {
         let mut tail = self.arg(list).list().unwrap().clone();
-        tail.pop_front();
+        // tail.pop_front();
+        tail.remove(0);
         self.stack.push(Value::List(tail));
     }
 
@@ -271,9 +269,10 @@ impl Arch {
         }
     }
 
-    fn jumpz(&mut self, addr: Addr) {
-        let top = self.pop_undefer();
-        if self.is_false(top) {
+    fn bne(&mut self, addr: Addr) {
+        let a = self.pop_undefer();
+        let b = self.pop_undefer();
+        if a != b {
             self.ip = addr;
         }
     }
@@ -334,17 +333,17 @@ impl Arch {
             use BC::*;
             match instr {
                 Builtin(func)   => self.builtin(func),
-                AddA(a, b)      => self.add_a(a, b),
+                AddA(a, b)      => self.add_a(a as usize, b as usize),
                 Arg(a)          => self.stack.push(self.arg(a).clone()),
+                Bne(addr)       => self.bne(addr),
                 Call(addr)      => self.call(addr),
                 CarA(a)         => self.car_a(a),
                 CdrA(a)         => self.cdr_a(a),
                 Debug(n)        => self.debug(n),
                 Defer(n)        => self.defer(n),
                 Jump(addr)      => self.ip = addr,
-                JumpZ(addr)     => self.jumpz(addr),
                 Label(_)        => (),
-                LtA(a, b)       => self.lt_a(a, b),
+                LtA(a, b)       => self.lt_a(a as usize, b as usize),
                 MoveArgs(argc)  => self.move_args(argc),
                 Pop(n)          => self.pop(n),
                 Load(v)         => self.stack.push(self.data[v].clone()),
@@ -372,7 +371,7 @@ pub fn link(program: &mut Vec<BC>) {
     for instr in program {
         match instr {
             BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
-            BC::JumpZ(index)    => *instr = BC::JumpZ(map_label_addr[index]),
+            BC::Bne(index)      => *instr = BC::Bne(map_label_addr[index]),
             BC::Call(index)     => *instr = BC::Call(map_label_addr[index]),
             BC::PushFn(index)   => *instr = BC::PushFn(map_label_addr[index]),
             _ => ()
@@ -384,4 +383,5 @@ pub fn execute(prog: Vec<BC>, data: Vec<Value>) {
     let mut arch = Arch::new(prog, data);
     arch.exec();
     println!("{:?}", arch);
+    println!("{:?}", std::mem::size_of::<Value>());
 }

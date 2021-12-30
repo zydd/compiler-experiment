@@ -189,8 +189,7 @@ impl Function {
                         out.extend([
                             BC::Load(addr),
                             BC::Arg(i),
-                            BC::Builtin(BuiltinFunction::Eq),
-                            BC::JumpZ(case_end),
+                            BC::Bne(case_end),
                         ]);
                     },
                 }
