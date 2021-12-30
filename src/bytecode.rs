@@ -42,6 +42,7 @@ pub enum BC {
     Defer(usize),
     Label(Addr),
     LtA(Addr, Addr),
+    MoveArgs(usize),
     Jump(Addr),
     JumpZ(Addr),
     Pop(usize),
@@ -211,6 +212,13 @@ impl Arch {
         return &self.stack[self.fp-1 - i]
     }
 
+    fn move_args(&mut self, argc: usize) {
+        for i in 0..argc {
+            self.stack[self.fp-1 - i] = self.stack.pop().unwrap();
+        }
+        assert_eq!(self.stack.len(), self.fp);
+    }
+
     fn pop(&mut self, n: usize) {
         self.stack.truncate(self.stack.len() - n);
     }
@@ -339,6 +347,7 @@ impl Arch {
                 JumpZ(addr)     => self.jumpz(addr),
                 Label(_)        => (),
                 LtA(a, b)       => self.lt_a(a, b),
+                MoveArgs(argc)  => self.move_args(argc),
                 Pop(n)          => self.pop(n),
                 Load(v)         => self.stack.push(self.data[v].clone()),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),

@@ -194,10 +194,29 @@ impl Function {
                 }
             }
 
-            out.extend(def[1].compile(ctx));
+            let tail_call =
+                if let S::S(expr) = &def[1] {
+                    expr[0].as_token() == &func.name
+                } else { false };
+
+            if tail_call {
+                println!("tail call {}", def[1]);
+                // compute args
+                for el in def[1].as_expr().iter().skip(1).rev() {
+                    out.extend(el.compile(ctx));
+                }
+                out.extend([
+                    BC::MoveArgs(func.arity),
+                    BC::Jump(func.label),
+                ]);
+            } else {
+                out.extend(def[1].compile(ctx));
+                out.extend([
+                    BC::Return(func.arity),
+                ]);
+            }
             out.extend([
-                BC::Return(func.arity),
-                BC::Label(case_end)
+                BC::Label(case_end),
             ]);
 
             ctx.exit();
@@ -216,20 +235,18 @@ impl Function {
         let name = expr[0].as_token();
         let func = ctx.get(name).unwrap();
         let mut out = Vec::new();
-        let mut args = Vec::new();
         let argc = expr.len() - 1;
 
         // assert_eq!(argc, func.function().unwrap().arity);
 
+        // compute args
         for el in expr.iter().skip(1).rev() {
-            args.extend(el.compile(ctx));
+            out.extend(el.compile(ctx));
         }
-
-        out.extend(args);
 
         if deferred {
             out.extend(func.value());
-            out.push(BC::Defer(expr.len()));
+            out.push(BC::Defer(argc + 1));
         } else {
             let func = func.function().unwrap();
 
