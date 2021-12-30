@@ -42,11 +42,13 @@ impl Context {
 
         macro_rules! builtin {
             ($instr: ident, $arity: expr, $func: literal) => {
-                new.set($func.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity)));
-                new.set(concat!("__builtin_", stringify!($instr)).to_string(),  CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity)));
+                let long_name = concat!("__builtin_", stringify!($instr));
+                new.set($func.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity, $func.to_string())));
+                new.set(long_name.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity, long_name.to_string())));
             };
             ($instr: ident, $arity: expr) => {
-                new.set(concat!("__builtin_", stringify!($instr)).to_string(),  CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity)));
+                let long_name = concat!("__builtin_", stringify!($instr));
+                new.set(long_name.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity, long_name.to_string())));
             };
         }
 
@@ -132,11 +134,11 @@ impl CodeGen {
 
 
 impl Function {
-    fn builtin(id: BuiltinFunction, arity: usize) -> Function {
+    fn builtin(id: BuiltinFunction, arity: usize, name: String) -> Function {
         let new = Function{
             builtin: true,
             label: id as usize,
-            name: String::new(),
+            name: name,
             code: Vec::new(),
             arity: arity,
         };
@@ -194,21 +196,27 @@ impl Function {
                 }
             }
 
-            let tail_call =
-                if let S::S(expr) = &def[1] {
-                    expr[0].as_token() == &func.name
-                } else { false };
-
-            if tail_call {
-                println!("tail call {}", def[1]);
+            if let S::S(expr) = &def[1] { // tail call
+                let next = ctx.get(expr[0].as_token()).unwrap();
+                let next = next.function().unwrap();
+                println!("tail call from {} to {:?}", def[1], next);
                 // compute args
-                for el in def[1].as_expr().iter().skip(1).rev() {
+                for el in expr.iter().skip(1).rev() {
                     out.extend(el.compile(ctx));
                 }
                 out.extend([
                     BC::MoveArgs(func.arity),
-                    BC::Jump(func.label),
                 ]);
+                if next.builtin {
+                    out.extend([
+                        BC::Builtin(BuiltinFunction::from_usize(next.label).unwrap()),
+                        BC::Return(next.arity),
+                    ]);
+                } else {
+                    out.extend([
+                        BC::Jump(next.label),
+                    ]);
+                }
             } else {
                 out.extend(def[1].compile(ctx));
                 out.extend([

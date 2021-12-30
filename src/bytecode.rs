@@ -213,10 +213,8 @@ impl Arch {
     }
 
     fn move_args(&mut self, argc: usize) {
-        for i in 0..argc {
-            self.stack[self.fp-1 - i] = self.stack.pop().unwrap();
-        }
-        assert_eq!(self.stack.len(), self.fp);
+        self.stack.drain((self.fp - argc)..self.fp);
+        self.fp = self.stack.len();
     }
 
     fn pop(&mut self, n: usize) {
