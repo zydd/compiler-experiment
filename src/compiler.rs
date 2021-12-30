@@ -270,6 +270,7 @@ impl TryFrom<&S> for Value {
     type Error = String;
     fn try_from(s: &S) -> Result<Self, Self::Error> {
         match s {
+            S::Bool(v)      => Ok(Value::Bool(v.clone())),
             S::Int(n)       => Ok(Value::Int(n.clone())),
             S::Float(n)     => Ok(Value::Float(n.clone())),
             S::Str(s)       => Ok(Value::Str(s.clone())),
@@ -356,6 +357,30 @@ impl S {
 }
 
 
+fn link(program: &mut Vec<BC>) {
+    let mut map_label_addr: HashMap<usize, usize> = HashMap::new();
+    let mut addr = 0;
+    for i in 0..program.len() {
+        if let BC::Label(index) = program[i] {
+            map_label_addr.insert(index, addr);
+        } else {
+            program[addr] = program[i].clone();
+            addr += 1;
+        }
+    }
+    program.truncate(addr);
+    for instr in program {
+        match instr {
+            BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
+            BC::Bne(index)      => *instr = BC::Bne(map_label_addr[index]),
+            BC::Call(index)     => *instr = BC::Call(map_label_addr[index]),
+            BC::PushFn(index)   => *instr = BC::PushFn(map_label_addr[index]),
+            _ => ()
+        }
+    }
+}
+
+
 pub fn compile(ast: &mut [S]) -> (Vec<BC>, Vec<Value>) {
     let mut out: Vec<BC> = Vec::new();
 
@@ -364,6 +389,8 @@ pub fn compile(ast: &mut [S]) -> (Vec<BC>, Vec<Value>) {
     for el in ast {
         out.extend(el.compile(&mut ctx));
     }
+
+    link(&mut out);
 
     return (out, ctx.data)
 }

@@ -4,6 +4,7 @@ use unescape::unescape;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum S {
+    Bool(bool),
     Int(isize),
     Float(f64),
     Str(String),
@@ -43,6 +44,7 @@ impl S {
 impl std::fmt::Display for S {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            S::Bool(v)      => write!(f, "{}", if *v { "True" } else { "False" }),
             S::Int(i)       => write!(f, "{}", i),
             S::Float(i)     => write!(f, "{}", i),
             S::Str(s)       => write!(f, "{:?}", s),
@@ -90,10 +92,11 @@ pub fn parse(code: String) -> Result<Vec<S>, String> {
         |^\\s+\
         |^(?P<d>')\
         |^(?P<p>[()])\
-        |^(?P<b>[\\[\\]])\
+        |^(?P<l>[\\[\\]])\
         |^\"(?P<q>[^\"\\\\]*(\\\\.[^\"\\\\]*)*)\"\
         |^(?P<f>\\d+\\.\\d*)\
         |^(?P<n>\\d+)\
+        |^(?P<b>(True|False)\\b)\
         |^(?P<t>[^\\s()\\[\\]]+)\
         ").unwrap();
 
@@ -104,7 +107,7 @@ pub fn parse(code: String) -> Result<Vec<S>, String> {
         i += cap[0].len();
         // println!("{:?}", cap);
 
-        if cap.name("p").is_some() || cap.name("b").is_some() {
+        if cap.name("p").is_some() || cap.name("l").is_some() {
             match &cap[0] {
                 "(" | "[" => {
                     stack.push(state);
@@ -138,7 +141,9 @@ pub fn parse(code: String) -> Result<Vec<S>, String> {
             cur = S::Token(String::from(&cap[0]));
         } else if cap.name("d").is_some() {
             state.defer_next = true;
-        } else {
+        } else if cap.name("b").is_some() {
+            cur = S::Bool(&cap[0] == "True");
+        } else  {
             // println!("skip: {:?}", &cap[0])
         }
 

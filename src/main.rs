@@ -14,56 +14,9 @@ fn main() {
 
     let ast = parser::parse(code).expect("parse error");
 
-    // println!("{}", interpreter::execute(&ast));
-
-    // use bytecode::BC::*;
-    // use bytecode::{Value, List};
-    // use bytecode::Value::Int;
-    // let mut prog = vec![
-    //     Jump(2),
-    //     Label(1),
-    //     LtA(1,2),
-    //     JumpZ(3),
-    //     PushFrame,
-    //     AddA(0,1),
-    //     Push(0),
-    //     Arg(1),
-    //     Add,
-    //     Arg(2),
-    //     Call(1),
-    //     Jump(4),
-    //     Label(3),
-    //     Arg(0),
-    //     Label(4),
-    //     Return,
-
-    //     Label(2),
-    //     PushFrame,
-    //     Push(1),
-    //     Push(2),
-    //     Push(3),
-    //     Call(1),
-    // ];
-    // bytecode::link(&mut prog);
-
-    // let mut data: Vec<Value> = Vec::from([
-    //     Int(1),
-    //     Int(0),
-    //     Int(0),
-    //     Int(10000001)
-    // ]);
-
-    // bytecode::execute(&prog, data);
-
-    for el in &ast {
-        println!("{}", el);
-    }
-
     let mut ast = ast;
-    let mut comp = compiler::compile(&mut ast);
+    let comp = compiler::compile(&mut ast);
     println!("\n{:?}\n", comp.0);
-
-    bytecode::link(&mut comp.0);
 
     const STACK_SIZE: usize = 1024 * 1024 * 1024;
     let thread = std::thread::Builder::new()

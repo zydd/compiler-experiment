@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-
-
 // type SString = smartstring::SmartString::<smartstring::Compact>;
 type Addr = usize;
 type Argc = u32;
@@ -175,11 +172,12 @@ impl Arch {
     }
 
     fn stdreturn(&mut self, argc: usize) {
-        // assert_eq!(self.stack.len(), self.fp + 1);
-        let ret = self.stack.pop().unwrap();
+        if argc > 0 {
+            let ret = self.stack.pop().unwrap();
 
-        self.stack.truncate(self.fp - argc);
-        self.stack.push(ret);
+            self.stack.truncate(self.fp - argc);
+            self.stack.push(ret);
+        }
     }
 
     fn returncall(&mut self, argc: usize) {
@@ -325,7 +323,7 @@ impl Arch {
     }
 
     fn exec(&mut self) {
-        while self.ip < self.prog.len() {
+        loop {
             let instr = self.prog[self.ip].clone();
             // println!("ip: {} {:?} {:?}", self.ip, instr, self.stack);
             self.ip += 1;
@@ -356,32 +354,11 @@ impl Arch {
     }
 }
 
-pub fn link(program: &mut Vec<BC>) {
-    let mut map_label_addr: HashMap<Addr, Addr> = HashMap::new();
-    let mut addr = 0;
-    for i in 0..program.len() {
-        if let BC::Label(index) = program[i] {
-            map_label_addr.insert(index, addr);
-        } else {
-            program[addr] = program[i].clone();
-            addr += 1;
-        }
-    }
-    program.truncate(addr);
-    for instr in program {
-        match instr {
-            BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
-            BC::Bne(index)      => *instr = BC::Bne(map_label_addr[index]),
-            BC::Call(index)     => *instr = BC::Call(map_label_addr[index]),
-            BC::PushFn(index)   => *instr = BC::PushFn(map_label_addr[index]),
-            _ => ()
-        }
-    }
-}
+pub fn execute(mut prog: Vec<BC>, data: Vec<Value>) {
+    prog.push(BC::Return(0));
 
-pub fn execute(prog: Vec<BC>, data: Vec<Value>) {
     let mut arch = Arch::new(prog, data);
     arch.exec();
+
     println!("{:?}", arch);
-    println!("{:?}", std::mem::size_of::<Value>());
 }
