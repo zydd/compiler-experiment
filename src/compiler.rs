@@ -116,10 +116,11 @@ impl CodeGen {
             CodeGen::Fn(func)       => func.value(),
         }
     }
+
     fn invoke(&self, ctx: &mut Context, expr: &[S]) -> Vec<BC> {
         match self {
             CodeGen::Arg(i)         => vec![BC::Arg(i.clone()), BC::Builtin(BuiltinFunction::Invoke)],
-            CodeGen::Fn(func)       => func.call(ctx, expr, false)
+            CodeGen::Fn(func)       => func.call(ctx, expr, false, 0)
         }
     }
 
@@ -160,7 +161,6 @@ impl Function {
 
         assert_eq!(expr.len() % 2, 1); // 1 + (args, body) pairs
 
-
         let fn_end = ctx.new_label();
         out.extend([
             BC::Jump(fn_end),
@@ -196,36 +196,15 @@ impl Function {
                 }
             }
 
-            if let S::S(expr) = &def[1] { // tail call
+            if let S::S(expr) = &def[1] {
                 let next = ctx.get(expr[0].as_token()).unwrap();
                 let next = next.function().unwrap();
-                println!("tail call from {} to {:?}", def[1], next);
-                // compute args
-                for el in expr.iter().skip(1).rev() {
-                    out.extend(el.compile(ctx));
-                }
-                out.extend([
-                    BC::MoveArgs(func.arity),
-                ]);
-                if next.builtin {
-                    out.extend([
-                        BC::Builtin(BuiltinFunction::from_usize(next.label).unwrap()),
-                        BC::Return(next.arity),
-                    ]);
-                } else {
-                    out.extend([
-                        BC::Jump(next.label),
-                    ]);
-                }
+                out.extend(next.call(ctx, expr, false, func.arity));
             } else {
                 out.extend(def[1].compile(ctx));
-                out.extend([
-                    BC::Return(func.arity),
-                ]);
+                out.push(BC::Return(func.arity));
             }
-            out.extend([
-                BC::Label(case_end),
-            ]);
+            out.push(BC::Label(case_end));
 
             ctx.exit();
         }
@@ -239,13 +218,11 @@ impl Function {
         return func
     }
 
-    fn call(&self, ctx: &mut Context, expr: &[S], deferred: bool) -> Vec<BC> {
-        let name = expr[0].as_token();
-        let func = ctx.get(name).unwrap();
+    fn call(&self, ctx: &mut Context, expr: &[S], deferred: bool, move_args: usize) -> Vec<BC> {
         let mut out = Vec::new();
         let argc = expr.len() - 1;
 
-        // assert_eq!(argc, func.function().unwrap().arity);
+        assert_eq!(expr[0].as_token(), &self.name);
 
         // compute args
         for el in expr.iter().skip(1).rev() {
@@ -253,19 +230,27 @@ impl Function {
         }
 
         if deferred {
-            out.extend(func.value());
+            out.extend(self.value());
             out.push(BC::Defer(argc + 1));
         } else {
-            let func = func.function().unwrap();
-
             if self.builtin {
                 out.push(BC::Builtin(BuiltinFunction::from_usize(self.label).unwrap()));
+
+                if move_args > 0 {
+                    out.push(BC::Return(move_args));
+                }
+            } else if move_args > 0 {
+                // tail call
+                out.extend([
+                    BC::MoveArgs(move_args),
+                    BC::Jump(self.label),
+                ]);
             } else {
-                out.push(BC::Call(func.label));
+                out.push(BC::Call(self.label));
             }
 
-            if argc > func.arity {
-                out.push(BC::ReturnCall(argc - func.arity));
+            if argc > self.arity {
+                out.push(BC::ReturnCall(argc - self.arity));
             }
         }
 
@@ -356,7 +341,7 @@ impl S {
                         },
                         _ => {
                             let func = ctx.get(name).unwrap();
-                            out.extend(func.function().unwrap().call(ctx, expr.as_expr(), true));
+                            out.extend(func.function().unwrap().call(ctx, expr.as_expr(), true, 0));
                         },
                     }
                 } else {
