@@ -1,6 +1,6 @@
 // type SString = smartstring::SmartString::<smartstring::Compact>;
-type Addr = usize;
-type Argc = u32;
+pub type Addr = u32;
+pub type Argc = u16;
 type ListType = std::collections::VecDeque<Value>;
 type IntType = isize;
 type FloatType = f64;
@@ -34,23 +34,23 @@ pub enum Value {
 pub enum BC {
     Builtin(BuiltinFunction),
     AddA(Argc, Argc),
-    Arg(Addr),
+    Arg(Argc),
     Bne(Addr),
-    CarA(Addr),
-    CdrA(Addr),
+    CarA(Argc),
+    CdrA(Argc),
     Call(Addr),
-    Debug(usize),
-    Defer(usize),
+    Debug(Argc),
+    Defer(Argc),
     Label(Addr),
-    LtA(Argc, Argc),
-    MoveArgs(usize),
-    Jump(Addr),
-    Pop(usize),
     Load(Addr),
+    LtA(Argc, Argc),
+    MoveArgs(Argc),
+    Jump(Addr),
+    Pop(Argc),
     PushFn(Addr),
     PushIns(Addr),
-    Return(usize),
-    ReturnCall(usize),
+    Return(Argc),
+    ReturnCall(Argc),
 }
 
 use num_traits::FromPrimitive;
@@ -77,6 +77,7 @@ pub enum BuiltinFunction {
     Car,
     Cdr,
 }
+
 
 macro_rules! enum_as {
     ($type:ty, $getter:ident, $enum:path) => {
@@ -129,10 +130,9 @@ value_trait!(Div, div);
 
 impl std::cmp::PartialOrd for Value {
     fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
-        use Value::*;
         match (self, rhs) {
-            (Int(a), Int(b)) => a.partial_cmp(b),
-            (Float(a), Float(b)) => a.partial_cmp(b),
+            (Value::Int(a),   Value::Int(b))   => a.partial_cmp(b),
+            (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
             _ => None,
         }
     }
@@ -167,23 +167,23 @@ impl Arch {
             fp: 0,
             prog: prog,
             data: data,
-            stack: Vec::new(),
+            stack: Vec::with_capacity(100),
         };
 
         return new
     }
 
-    fn stdreturn(&mut self, argc: usize) {
+    fn stdreturn(&mut self, argc: Argc) {
         if argc > 0 {
             let ret = self.stack.pop().unwrap();
 
-            self.stack.truncate(self.fp - argc);
+            self.stack.truncate(self.fp as usize - argc as usize);
             self.stack.push(ret);
         }
     }
 
-    fn returncall(&mut self, argc: usize) {
-        let stack_len = self.stack.len() - argc;
+    fn returncall(&mut self, argc: Argc) {
+        let stack_len = self.stack.len() - argc as usize;
         while self.stack.len() != stack_len {
             self.invoke();
         }
@@ -196,7 +196,7 @@ impl Arch {
         let fp = self.fp;
 
         self.ip = addr;
-        self.fp = frame;
+        self.fp = frame as Addr;
 
         self.exec();
 
@@ -204,39 +204,39 @@ impl Arch {
         self.fp = fp;
     }
 
-    fn arg(&self, i: Addr) -> &Value {
-        return &self.stack[self.fp-1 - i]
+    fn arg(&self, i: Argc) -> &Value {
+        return &self.stack[self.fp as usize - 1 - i as usize]
     }
 
-    fn move_args(&mut self, argc: usize) {
-        self.stack.drain((self.fp - argc)..self.fp);
-        self.fp = self.stack.len();
+    fn move_args(&mut self, argc: Argc) {
+        self.stack.drain((self.fp as usize - argc as usize)..self.fp as usize);
+        self.fp = self.stack.len() as Addr;
     }
 
-    fn pop(&mut self, n: usize) {
-        self.stack.truncate(self.stack.len() - n);
+    fn pop(&mut self, n: Argc) {
+        self.stack.truncate(self.stack.len() - n as usize);
     }
 
-    fn debug(&mut self, n: usize) {
+    fn debug(&mut self, n: Argc) {
         let i = std::cmp::max(0, self.stack.len() as isize - n as isize) as usize;
         println!("Debug: ip: {} fp: {} stack: [{}..] {:?}", self.ip, self.fp, i, &self.stack[i..])
     }
 
-    fn add_a(&mut self, a: usize, b: usize) {
+    fn add_a(&mut self, a: Argc, b: Argc) {
         let a = self.arg(a).int().unwrap();
         let b = self.arg(b).int().unwrap();
         let ret = Value::Int(a + b);
         self.stack.push(ret);
     }
 
-    fn lt_a(&mut self, a: usize, b: usize) {
+    fn lt_a(&mut self, a: Argc, b: Argc) {
         let a = self.arg(a).int().unwrap();
         let b = self.arg(b).int().unwrap();
         let ret = Value::Int((a < b) as isize);
         self.stack.push(ret);
     }
 
-    fn car_a(&mut self, list: Addr) {
+    fn car_a(&mut self, list: Argc) {
         let head = self.arg(list).list().unwrap()[0].clone();
         self.stack.push(head);
     }
@@ -253,7 +253,7 @@ impl Arch {
         self.stack.push(Value::List(tail));
     }
 
-    fn cdr_a(&mut self, list: Addr) {
+    fn cdr_a(&mut self, list: Argc) {
         let mut tail = self.arg(list).list().unwrap().clone();
         // tail.pop_front();
         tail.remove(0);
@@ -263,7 +263,7 @@ impl Arch {
     fn invoke(&mut self) {
         match self.pop_undefer() {
             Value::Function(addr) => self.call(addr),
-            Value::Builtin(addr) => self.builtin(BuiltinFunction::from_usize(addr).unwrap()),
+            Value::Builtin(addr) => self.builtin(BuiltinFunction::from_usize(addr as usize).unwrap()),
 
             other => panic!("not invokable: {:?}", other),
         }
@@ -277,8 +277,8 @@ impl Arch {
         }
     }
 
-    fn defer(&mut self, count: usize) {
-        let tail = self.stack.split_off(self.stack.len() - count);
+    fn defer(&mut self, count: Argc) {
+        let tail = self.stack.split_off(self.stack.len() - count as usize);
         self.stack.push(Value::Deferred(tail));
     }
 
@@ -326,14 +326,14 @@ impl Arch {
 
     fn exec(&mut self) {
         loop {
-            let instr = self.prog[self.ip].clone();
+            let instr = self.prog[self.ip as usize].clone();
             // println!("ip: {} {:?} {:?}", self.ip, instr, self.stack);
             self.ip += 1;
 
             use BC::*;
             match instr {
                 Builtin(func)   => self.builtin(func),
-                AddA(a, b)      => self.add_a(a as usize, b as usize),
+                AddA(a, b)      => self.add_a(a, b),
                 Arg(a)          => self.stack.push(self.arg(a).clone()),
                 Bne(addr)       => self.bne(addr),
                 Call(addr)      => self.call(addr),
@@ -343,8 +343,8 @@ impl Arch {
                 Defer(n)        => self.defer(n),
                 Jump(addr)      => self.ip = addr,
                 Label(_)        => (),
-                Load(v)         => self.stack.push(self.data[v].clone()),
-                LtA(a, b)       => self.lt_a(a as usize, b as usize),
+                Load(v)         => self.stack.push(self.data[v as usize].clone()),
+                LtA(a, b)       => self.lt_a(a, b),
                 MoveArgs(argc)  => self.move_args(argc),
                 Pop(n)          => self.pop(n),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),

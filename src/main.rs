@@ -6,6 +6,8 @@ mod compiler;
 mod bytecode;
 
 fn main() {
+    println!("BC: {}", std::mem::size_of::<bytecode::BC>());
+
     let path = std::env::args().nth(1).expect("path");
     let mut file = std::fs::File::open(path).expect("open file");
 

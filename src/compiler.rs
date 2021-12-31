@@ -4,24 +4,24 @@ use num_traits::FromPrimitive;
 use crate::parser::*;
 use crate::bytecode::*;
 
-type Label = usize;
+type Label = Addr;
 
 
 #[derive(Clone, Debug, PartialEq)]
 enum FunctionType {
+    Arg,
     Builtin,
     Call,
-    Arg,
 }
 
 
 #[derive(Clone, Debug)]
 struct Function {
     fntype: FunctionType,
-    label: usize,
+    label: Label,
     name: String,
     code: Vec<BC>,
-    arity: usize,
+    arity: Argc,
 }
 
 
@@ -110,7 +110,7 @@ impl Context {
 
 
 impl Function {
-    fn arg(index: usize, name: String) -> Function {
+    fn arg(index: Label, name: String) -> Function {
         return Function{
             fntype: FunctionType::Arg,
             label: index,
@@ -120,10 +120,10 @@ impl Function {
         }
     }
 
-    fn builtin(id: BuiltinFunction, arity: usize, name: String) -> Function {
+    fn builtin(id: BuiltinFunction, arity: Argc, name: String) -> Function {
         return Function{
             fntype: FunctionType::Builtin,
-            label: id as usize,
+            label: id as Label,
             name: name,
             code: Vec::new(),
             arity: arity,
@@ -139,7 +139,7 @@ impl Function {
             label: ctx.new_label(),
             name: expr[1].as_expr()[0].as_token().clone(),
             code: Vec::new(),
-            arity: expr[1].as_expr().len() - 1,
+            arity: (expr[1].as_expr().len() - 1) as Argc ,
         };
 
         assert_eq!(expr.len() % 2, 1); // 1 + (args, body) pairs
@@ -154,7 +154,7 @@ impl Function {
         ctx.set(func.name.clone(), func.clone());
 
         for def in expr[1..].chunks(2) {
-            assert_eq!(def[0].as_expr().len(), func.arity + 1);
+            assert_eq!(def[0].as_expr().len(), func.arity as usize + 1);
             assert_eq!(def[0].as_expr()[0].as_token(), &func.name);
 
             let case_end = ctx.new_label();
@@ -163,15 +163,15 @@ impl Function {
             for (i, arg) in def[0].as_expr().iter().skip(1).enumerate() {
                 match arg {
                     S::Token(argname) => if argname != "_" {
-                        ctx.set(argname.clone(), Function::arg(i, argname.clone()))
+                        ctx.set(argname.clone(), Function::arg(i as Label, argname.clone()))
                     },
                     other => {
-                        let addr = ctx.data.len();
+                        let addr = ctx.data.len() as Addr;
                         ctx.data.push(Value::try_from(other).unwrap());
 
                         out.extend([
                             BC::Load(addr),
-                            BC::Arg(i),
+                            BC::Arg(i as Argc),
                             BC::Bne(case_end),
                         ]);
                     },
@@ -199,9 +199,9 @@ impl Function {
         return func
     }
 
-    fn call(&self, ctx: &mut Context, expr: &[S], deferred: bool, move_args: usize) -> Vec<BC> {
+    fn call(&self, ctx: &mut Context, expr: &[S], deferred: bool, move_args: Argc) -> Vec<BC> {
         let mut out = Vec::new();
-        let argc = expr.len() - 1;
+        let argc = (expr.len() - 1) as Argc;
 
         assert_eq!(expr[0].as_token(), &self.name);
 
@@ -218,12 +218,12 @@ impl Function {
                 FunctionType::Arg => {
                     assert_eq!(move_args, 0);
                     out.extend([
-                        BC::Arg(self.label),
+                        BC::Arg(self.label as Argc),
                         BC::Builtin(BuiltinFunction::Invoke),
                     ]);
                 },
                 FunctionType::Builtin => {
-                    out.push(BC::Builtin(BuiltinFunction::from_usize(self.label).unwrap()));
+                    out.push(BC::Builtin(BuiltinFunction::from_usize(self.label as usize).unwrap()));
 
                     if move_args > 0 {
                         out.push(BC::Return(move_args));
@@ -252,9 +252,9 @@ impl Function {
 
     fn value(&self) -> Vec<BC> {
         match self.fntype {
-            FunctionType::Arg => vec![BC::Arg(self.label)],
-            FunctionType::Builtin => vec![BC::PushIns(self.label)],
-            FunctionType::Call => vec![BC::PushFn(self.label)],
+            FunctionType::Arg       => vec![BC::Arg(self.label as Argc)],
+            FunctionType::Builtin   => vec![BC::PushIns(self.label)],
+            FunctionType::Call      => vec![BC::PushFn(self.label)],
         }
     }
 }
@@ -303,7 +303,7 @@ impl S {
                 }
             },
             S::Bool(_) | S::Int(_) | S::Float(_) | S::Str(_) | S::List(_) => {
-                let addr = ctx.data.len();
+                let addr = ctx.data.len() as Addr;
                 ctx.data.push(Value::try_from(self).unwrap());
                 out.push(BC::Load(addr));
             },
@@ -337,17 +337,17 @@ impl S {
 
 
 fn link(program: &mut Vec<BC>) {
-    let mut map_label_addr: HashMap<usize, usize> = HashMap::new();
+    let mut map_label_addr: HashMap<Label, Addr> = HashMap::new();
     let mut addr = 0;
     for i in 0..program.len() {
         if let BC::Label(index) = program[i] {
             map_label_addr.insert(index, addr);
         } else {
-            program[addr] = program[i].clone();
+            program[addr as usize] = program[i].clone();
             addr += 1;
         }
     }
-    program.truncate(addr);
+    program.truncate(addr as usize);
     for instr in program {
         match instr {
             BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
