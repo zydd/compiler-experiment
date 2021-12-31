@@ -1,7 +1,9 @@
 // type SString = smartstring::SmartString::<smartstring::Compact>;
 type Addr = usize;
 type Argc = u32;
-pub type List = std::collections::VecDeque<Value>;
+type ListType = std::collections::VecDeque<Value>;
+type IntType = isize;
+type FloatType = f64;
 
 
 #[derive(Debug)]
@@ -17,10 +19,10 @@ struct Arch {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Bool(bool),
-    Int(isize),
-    Float(f64),
+    Int(IntType),
+    Float(FloatType),
     Str(String),
-    List(List),
+    List(ListType),
     Deferred(Vec<Value>),
     Function(Addr),
     Builtin(Addr),
@@ -91,8 +93,8 @@ macro_rules! enum_as {
 
 impl Value {
     enum_as!(isize, int, Value::Int);
-    enum_as!(List, list, Value::List);
-    pub fn as_list_mut(self) -> List {
+    enum_as!(ListType, list, Value::List);
+    pub fn as_list_mut(self) -> ListType {
         if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
     }
     pub fn as_deferred(self) -> Vec<Value> {
@@ -341,13 +343,13 @@ impl Arch {
                 Defer(n)        => self.defer(n),
                 Jump(addr)      => self.ip = addr,
                 Label(_)        => (),
+                Load(v)         => self.stack.push(self.data[v].clone()),
                 LtA(a, b)       => self.lt_a(a as usize, b as usize),
                 MoveArgs(argc)  => self.move_args(argc),
                 Pop(n)          => self.pop(n),
-                Load(v)         => self.stack.push(self.data[v].clone()),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),
                 PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
-                Return(argc)    => { self.stdreturn(argc); break; },
+                Return(argc)    => {self.stdreturn(argc); break},
                 ReturnCall(argc) => self.returncall(argc),
             }
         }

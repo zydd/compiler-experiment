@@ -7,19 +7,19 @@ use crate::bytecode::*;
 type Label = usize;
 
 
-#[derive(Debug)]
-enum CodeGen {
-    Arg(usize),
-    Fn(Function),
-    // Builtin(BuiltinFunction),
+#[derive(Clone, Debug, PartialEq)]
+enum FunctionType {
+    Builtin,
+    Call,
+    Arg,
 }
 
 
 #[derive(Clone, Debug)]
 struct Function {
+    fntype: FunctionType,
     label: usize,
     name: String,
-    builtin: bool,
     code: Vec<BC>,
     arity: usize,
 }
@@ -28,7 +28,7 @@ struct Function {
 struct Context {
     label_index: Label,
     data: Vec<Value>,
-    scope: Vec<HashMap<String, std::rc::Rc<Box<CodeGen>>>>,
+    scope: Vec<HashMap<String, std::rc::Rc<Box<Function>>>>,
 }
 
 
@@ -43,12 +43,12 @@ impl Context {
         macro_rules! builtin {
             ($instr: ident, $arity: expr, $func: literal) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set($func.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity, $func.to_string())));
-                new.set(long_name.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity, long_name.to_string())));
+                new.set($func.to_string(), Function::builtin(BuiltinFunction::$instr, $arity, $func.to_string()));
+                new.set(long_name.to_string(), Function::builtin(BuiltinFunction::$instr, $arity, long_name.to_string()));
             };
             ($instr: ident, $arity: expr) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set(long_name.to_string(), CodeGen::Fn(Function::builtin(BuiltinFunction::$instr, $arity, long_name.to_string())));
+                new.set(long_name.to_string(), Function::builtin(BuiltinFunction::$instr, $arity, long_name.to_string()));
             };
         }
 
@@ -82,7 +82,7 @@ impl Context {
         return label
     }
 
-    fn get(&self, key: &String) -> Option<std::rc::Rc<Box<CodeGen>>> {
+    fn get(&self, key: &String) -> Option<std::rc::Rc<Box<Function>>> {
         for scope in self.scope.iter().rev() {
             if let Some(v) = scope.get(key) {
                 return Some(v.clone())
@@ -94,7 +94,7 @@ impl Context {
         return None
     }
 
-    fn set(&mut self, var: String, code: CodeGen) {
+    fn set(&mut self, var: String, code: Function) {
         let current = self.scope.last_mut().unwrap();
         current.insert(var, std::rc::Rc::new(Box::new(code)));
     }
@@ -109,42 +109,25 @@ impl Context {
 }
 
 
-impl CodeGen {
-    fn value(&self) -> Vec<BC> {
-        match self {
-            CodeGen::Arg(i)         => vec![BC::Arg(i.clone())],
-            CodeGen::Fn(func)       => func.value(),
-        }
-    }
-
-    fn invoke(&self, ctx: &mut Context, expr: &[S]) -> Vec<BC> {
-        match self {
-            CodeGen::Arg(i)         => vec![BC::Arg(i.clone()), BC::Builtin(BuiltinFunction::Invoke)],
-            CodeGen::Fn(func)       => func.call(ctx, expr, false, 0)
-        }
-    }
-
-    fn function(&self) -> Option<&Function> {
-        if let CodeGen::Fn(func) = self {
-            return Some(func)
-        } else {
-            panic!("not a function: {:?}", self)
-        }
-    }
-}
-
-
 impl Function {
+    fn arg(index: usize, name: String) -> Function {
+        return Function{
+            fntype: FunctionType::Arg,
+            label: index,
+            name: name,
+            code: Vec::new(),
+            arity: 0,
+        }
+    }
+
     fn builtin(id: BuiltinFunction, arity: usize, name: String) -> Function {
-        let new = Function{
-            builtin: true,
+        return Function{
+            fntype: FunctionType::Builtin,
             label: id as usize,
             name: name,
             code: Vec::new(),
             arity: arity,
-        };
-
-        return new
+        }
     }
 
     fn compile(ctx: &mut Context, expr: &S) -> Function {
@@ -152,11 +135,11 @@ impl Function {
 
         let mut out = Vec::new();
         let mut func = Function{
+            fntype: FunctionType::Call,
             label: ctx.new_label(),
             name: expr[1].as_expr()[0].as_token().clone(),
             code: Vec::new(),
             arity: expr[1].as_expr().len() - 1,
-            builtin: false,
         };
 
         assert_eq!(expr.len() % 2, 1); // 1 + (args, body) pairs
@@ -168,7 +151,7 @@ impl Function {
         ]);
 
         ctx.enter();
-        ctx.set(func.name.clone(), CodeGen::Fn(func.clone()));
+        ctx.set(func.name.clone(), func.clone());
 
         for def in expr[1..].chunks(2) {
             assert_eq!(def[0].as_expr().len(), func.arity + 1);
@@ -180,7 +163,7 @@ impl Function {
             for (i, arg) in def[0].as_expr().iter().skip(1).enumerate() {
                 match arg {
                     S::Token(argname) => if argname != "_" {
-                        ctx.set(argname.clone(), CodeGen::Arg(i))
+                        ctx.set(argname.clone(), Function::arg(i, argname.clone()))
                     },
                     other => {
                         let addr = ctx.data.len();
@@ -197,7 +180,6 @@ impl Function {
 
             if let S::S(expr) = &def[1] {
                 let next = ctx.get(expr[0].as_token()).unwrap();
-                let next = next.function().unwrap();
                 out.extend(next.call(ctx, expr, false, func.arity));
             } else {
                 out.extend(def[1].compile(ctx));
@@ -232,20 +214,32 @@ impl Function {
             out.extend(self.value());
             out.push(BC::Defer(argc + 1));
         } else {
-            if self.builtin {
-                out.push(BC::Builtin(BuiltinFunction::from_usize(self.label).unwrap()));
+            match self.fntype {
+                FunctionType::Arg => {
+                    assert_eq!(move_args, 0);
+                    out.extend([
+                        BC::Arg(self.label),
+                        BC::Builtin(BuiltinFunction::Invoke),
+                    ]);
+                },
+                FunctionType::Builtin => {
+                    out.push(BC::Builtin(BuiltinFunction::from_usize(self.label).unwrap()));
 
-                if move_args > 0 {
-                    out.push(BC::Return(move_args));
-                }
-            } else if move_args > 0 {
-                // tail call
-                out.extend([
-                    BC::MoveArgs(move_args),
-                    BC::Jump(self.label),
-                ]);
-            } else {
-                out.push(BC::Call(self.label));
+                    if move_args > 0 {
+                        out.push(BC::Return(move_args));
+                    }
+                },
+                FunctionType::Call => {
+                    if move_args > 0 {
+                        // tail call
+                        out.extend([
+                            BC::MoveArgs(move_args),
+                            BC::Jump(self.label),
+                        ]);
+                    } else {
+                        out.push(BC::Call(self.label));
+                    }
+                },
             }
 
             if argc > self.arity {
@@ -257,10 +251,10 @@ impl Function {
     }
 
     fn value(&self) -> Vec<BC> {
-        if self.builtin {
-            return vec![BC::PushIns(self.label)]
-        } else {
-            return vec![BC::PushFn(self.label)]
+        match self.fntype {
+            FunctionType::Arg => vec![BC::Arg(self.label)],
+            FunctionType::Builtin => vec![BC::PushIns(self.label)],
+            FunctionType::Call => vec![BC::PushFn(self.label)],
         }
     }
 }
@@ -297,33 +291,18 @@ impl S {
                         "def" => {
                             let func = Function::compile(ctx, self);
                             out.extend(func.code.clone());
-                            ctx.set(func.name.clone(), CodeGen::Fn(func));
+                            ctx.set(func.name.clone(), func);
                         },
                         _ => {
                             let func = ctx.get(name).unwrap();
-                            out.extend(func.invoke(ctx, expr));
+                            out.extend(func.call(ctx, expr, false, 0));
                         },
                     }
                 } else {
                     panic!("not a function call: {:?}", expr)
                 }
             },
-            S::Int(n) => {
-                let addr = ctx.data.len();
-                ctx.data.push(Value::Int(n.clone()));
-                out.push(BC::Load(addr));
-            },
-            S::Float(n) => {
-                let addr = ctx.data.len();
-                ctx.data.push(Value::Float(n.clone()));
-                out.push(BC::Load(addr));
-            },
-            S::Str(n) => {
-                let addr = ctx.data.len();
-                ctx.data.push(Value::Str(n.clone()));
-                out.push(BC::Load(addr));
-            },
-            S::List(_) => {
+            S::Bool(_) | S::Int(_) | S::Float(_) | S::Str(_) | S::List(_) => {
                 let addr = ctx.data.len();
                 ctx.data.push(Value::try_from(self).unwrap());
                 out.push(BC::Load(addr));
@@ -337,11 +316,11 @@ impl S {
                         "def" => {
                             let func = Function::compile(ctx, self);
                             out.extend(func.code.clone());
-                            ctx.set(func.name.clone(), CodeGen::Fn(func));
+                            ctx.set(func.name.clone(), func);
                         },
                         _ => {
                             let func = ctx.get(name).unwrap();
-                            out.extend(func.function().unwrap().call(ctx, expr.as_expr(), true, 0));
+                            out.extend(func.call(ctx, expr.as_expr(), true, 0));
                         },
                     }
                 } else {
