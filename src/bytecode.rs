@@ -25,12 +25,12 @@ pub enum Value {
     List(ListType),
     Deferred(Vec<Value>),
     Function(Addr),
-    Builtin(Addr),
+    Builtin(BuiltinFunction),
 }
 
 
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BC {
     Builtin(BuiltinFunction),
     AddA(Argc, Argc),
@@ -48,13 +48,12 @@ pub enum BC {
     Jump(Addr),
     Pop(Argc),
     PushFn(Addr),
-    PushIns(Addr),
+    PushIns(BuiltinFunction),
     Return(Argc),
     ReturnCall(Argc),
 }
 
-use num_traits::FromPrimitive;
-#[derive(Clone, Debug, num_derive::FromPrimitive)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BuiltinFunction {
     Nop,
     Except,
@@ -263,7 +262,7 @@ impl Arch {
     fn invoke(&mut self) {
         match self.pop_undefer() {
             Value::Function(addr) => self.call(addr),
-            Value::Builtin(addr) => self.builtin(BuiltinFunction::from_usize(addr as usize).unwrap()),
+            Value::Builtin(func) => self.builtin(func),
 
             other => panic!("not invokable: {:?}", other),
         }
@@ -348,7 +347,7 @@ impl Arch {
                 MoveArgs(argc)  => self.move_args(argc),
                 Pop(n)          => self.pop(n),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),
-                PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
+                PushIns(func)   => self.stack.push(Value::Builtin(func)),
                 Return(argc)    => {self.stdreturn(argc); break},
                 ReturnCall(argc) => self.returncall(argc),
             }
