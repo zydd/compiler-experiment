@@ -6,31 +6,33 @@ type Label = Addr;
 
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FunctionInfo {
-    pub name: String,
-    pub arity: Argc,
-    pub deferred: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct FunctionArg {
-    index: Argc
+    name: String,
+    index: Argc,
+    // deferred: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionBuiltin {
-    opcode: BuiltinFunction
+    name: String,
+    arity: Argc,
+    opcode: BuiltinFunction,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionCall {
+    name: String,
+    argc: Argc,
     label: Label,
     args: Vec<Function>,
-    tail_call: Option<Argc>
+    tail_call: Option<Argc>,
+    pub deferred: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionDefinition {
+    name: String,
+    arity: Argc,
     label: Label,
     defs: Vec<(Vec<Function>, Function)>
 }
@@ -42,20 +44,13 @@ pub struct FunctionLiteral {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum FnData {
+pub enum Function {
     Arg(FunctionArg),
     Builtin(FunctionBuiltin),
     Call(FunctionCall),
     Definition(FunctionDefinition),
     Literal(FunctionLiteral),
-    Unknown,
-}
-
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Function {
-    pub info: FunctionInfo,
-    data: FnData,
+    Unknown(String),
 }
 
 
@@ -77,12 +72,12 @@ impl Context {
         macro_rules! builtin {
             ($instr: ident, $arity: expr, $func: literal) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set(FunctionBuiltin::new(BuiltinFunction::$instr, $arity, $func.to_string()));
-                new.set(FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
+                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, $func.to_string()));
+                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
             };
             ($instr: ident, $arity: expr) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set(FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
+                new.set(long_name.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
             };
         }
 
@@ -128,9 +123,8 @@ impl Context {
         return None
     }
 
-    fn set(&mut self, function: Function) -> std::rc::Rc<std::cell::RefCell<Function>> {
+    fn set(&mut self, name: String, function: Function) -> std::rc::Rc<std::cell::RefCell<Function>> {
         let current = self.scope.last_mut().unwrap();
-        let name = function.info.name.clone();
 
         let function = std::rc::Rc::new(std::cell::RefCell::new(function));
         current.insert(name, function.clone());
@@ -149,27 +143,21 @@ impl Context {
 
 impl FunctionArg {
     pub fn new(index: Argc, name: String) -> Function {
-        return Function{
-            data: FnData::Arg(FunctionArg{index: index}),
-            info: FunctionInfo {
-                name: name,
-                arity: 0,
-                deferred: false,
-            },
-        }
+        return Function::Arg(FunctionArg{
+            name: name,
+            index: index,
+            // deferred: false,
+        })
     }
 }
 
 impl FunctionBuiltin {
     pub fn new(id: BuiltinFunction, arity: Argc, name: String) -> Function {
-        return Function{
-            data: FnData::Builtin(FunctionBuiltin{opcode: id}),
-            info: FunctionInfo {
-                name: name,
-                arity: arity,
-                deferred: false,
-            },
-        }
+        return Function::Builtin(FunctionBuiltin{
+            opcode: id,
+            name: name,
+            arity: arity,
+        })
     }
 }
 
@@ -177,96 +165,87 @@ impl FunctionDefinition {
     pub fn new(expr: Vec<Function>) -> Function {
         assert_eq!(expr.len() >= 3, true);
         assert_eq!(expr.len() % 2, 1); // def + (args, body) pairs
-        assert_eq!(expr[0].info.name, "def");
-        assert_eq!(expr[0].data, FnData::Unknown);
+        assert_eq!(matches!(&expr[0], Function::Unknown(name) if name == "def"), true);
 
-        let call = expr[1].call().expect("call");
-        let mut func = Function{
-            data: FnData::Unknown,
-            info: FunctionInfo {
-                name: expr[1].info.name.clone(),
-                arity: call.args.len() as Argc,
-                deferred: false,
-            },
+        let call = expr[1].call().unwrap();
+        let mut func = FunctionDefinition{
+            name: call.name.clone(),
+            arity: call.args.len() as Argc,
+            label: 0,
+            defs: Vec::new()
         };
 
-        let mut data = FunctionDefinition{label: 0, defs: Vec::new()};
-
         for def in expr[1..].chunks(2) {
-            assert_eq!(def[0].info, func.info);
-            assert_eq!(matches!(&def[0].data, FnData::Call{..}), true);
+            let call = def[0].call().unwrap();
+            assert_eq!(call.name, func.name);
+            assert_eq!(matches!(&def[0], Function::Call{..}), true);
 
-            data.defs.push((def[0].call().expect("call").args.clone(), def[1].clone()));
+            func.defs.push((call.args.clone(), def[1].clone()));
         }
 
-        func.data = FnData::Definition(data);
-        return func
+        return Function::Definition(func)
     }
 }
 
 impl FunctionCall {
     pub fn new(expr: Vec<Function>) -> Function {
         assert_eq!(expr.len() > 0, true);
-        assert_eq!(expr[0].data, FnData::Unknown);
+        assert_eq!(matches!(expr[0], Function::Unknown(_)), true);
 
-        return Function{
-            data: FnData::Call(FunctionCall{
+        if let Function::Unknown(name) = &expr[0] {
+            return Function::Call(FunctionCall{
+                name: name.clone(),
+                argc: (expr.len() - 1) as Argc,
                 label: 0,
                 args: expr[1..].to_vec(),
                 tail_call: None,
-            }),
-            info: FunctionInfo{
-                name: expr[0].info.name.clone(),
-                arity: (expr.len() - 1) as Argc,
                 deferred: false,
-            }
+            })
+        } else {
+            panic!()
         }
     }
 }
 
 impl FunctionLiteral {
     pub fn new(value: Value) -> Function {
-        return Function{
-            data: FnData::Literal(FunctionLiteral{data_label: 0, value: value}),
-            info: FunctionInfo{
-                name: String::new(),
-                arity: 0,
-                deferred: false,
-            }
-        }
+        return Function::Literal(FunctionLiteral{
+            data_label: 0,
+            value: value,
+        })
     }
 }
 
 
 impl Function {
     pub fn new(name: String) -> Function {
-        return Function{
-            data: FnData::Unknown,
-            info: FunctionInfo{
-                name: name,
-                arity: 0,
-                deferred: false,
-            },
-        }
+        return Function::Unknown(name)
     }
 
     pub fn call(&self) -> Option<&FunctionCall> {
         match self {
-            Function{data: FnData::Call(data), ..} => Some(data),
+            Function::Call(data) => Some(data),
+            _ => None
+        }
+    }
+
+    pub fn call_mut(&mut self) -> Option<&mut FunctionCall> {
+        match self {
+            Function::Call(data) => Some(data),
             _ => None
         }
     }
 
     pub fn literal(&self) -> Option<&FunctionLiteral> {
         match self {
-            Function{data: FnData::Literal(data), ..} => Some(data),
+            Function::Literal(data) => Some(data),
             _ => None
         }
     }
 
     // pub fn definition_mut(&mut self) -> Option<&mut FunctionDefinition> {
     //     match self {
-    //         Function{data: FnData::Definition(data), ..} => Some(data),
+    //         Function::Definition(data) => Some(data),
     //         _ => None
     //     }
     // }
@@ -275,12 +254,9 @@ impl Function {
         let mut out = Vec::new();
 
         match self {
-            Function{data: FnData::Definition(data), ..} => {
+            Function::Definition(data) => {
                 data.label = ctx.new_label();
-                ctx.set(Function {
-                    data: FnData::Definition(data.clone()),
-                    info: self.info.clone(),
-                });
+                ctx.set(data.name.clone(), Function::Definition(data.clone()));
 
                 let fn_end = ctx.new_label();
                 out.extend([
@@ -293,13 +269,13 @@ impl Function {
                     let case_end = ctx.new_label();
                     ctx.enter();
 
-                    for (i, arg) in args.iter_mut().enumerate() {
-                        match &mut arg.data {
-                            FnData::Unknown => if arg.info.name != "_" {
-                                ctx.set(FunctionArg::new(i as Argc, arg.info.name.clone()));
+                    for (i, mut arg) in args.iter_mut().enumerate() {
+                        match &mut arg {
+                            Function::Unknown(name) => if name != "_" {
+                                ctx.set(name.clone(), FunctionArg::new(i as Argc, name.clone()));
                             }
 
-                            FnData::Literal(literal) => {
+                            Function::Literal(literal) => {
                                 let addr = ctx.data.len() as Addr;
                                 ctx.data.push(Value::try_from(literal.value.clone()).unwrap());
 
@@ -314,14 +290,14 @@ impl Function {
                         }
                     }
 
-                    if let FnData::Call(call) = &mut def.data {
+                    if let Function::Call(call) = def {
                         // tail_call makes the Call responsible for handling the return
-                        call.tail_call = Some(self.info.arity);
+                        call.tail_call = Some(data.arity);
                         out.extend(def.compile(ctx));
                     } else {
                         out.extend(def.compile(ctx));
                         out.extend([
-                            BC::Return(self.info.arity),
+                            BC::Return(data.arity),
                         ]);
                     }
 
@@ -334,8 +310,8 @@ impl Function {
                 ]);
             }
 
-            Function{data: FnData::Call(data), ..} => {
-                let func = ctx.get(&self.info.name).expect(&self.info.name);
+            Function::Call(data) => {
+                let func = ctx.get(&data.name).expect(&data.name);
                 let func = func.borrow_mut();
 
                 // compute args
@@ -343,12 +319,12 @@ impl Function {
                     out.extend(arg.compile(ctx));
                 }
 
-                if self.info.deferred {
-                    out.extend(Function::fn_as_value(&func.data));
+                if data.deferred {
+                    out.extend(Function::fn_as_value(&func));
                     out.push(BC::Defer(data.args.len() as Argc + 1));
                 } else {
-                    match &func.data {
-                        FnData::Arg(arg_data) => {
+                    match &*func {
+                        Function::Arg(arg_data) => {
                             out.extend([
                                 BC::Arg(arg_data.index),
                             ]);
@@ -367,7 +343,7 @@ impl Function {
                             }
                         }
 
-                        FnData::Builtin(func_data) => {
+                        Function::Builtin(func_data) => {
                             out.extend([
                                 BC::Builtin(func_data.opcode.clone()),
                             ]);
@@ -379,18 +355,18 @@ impl Function {
                             }
                         }
 
-                        FnData::Definition(func_data) => {
+                        Function::Definition(func_data) => {
                             if let Some(move_args) = data.tail_call {
                                 out.extend([
                                     BC::MoveArgs(move_args),
                                 ]);
                             }
 
-                            if data.args.len() > func.info.arity as usize {
+                            if data.args.len() > func_data.arity as usize {
                                 // do not Jump if "over-currying"
                                 out.extend([
                                     BC::Call(func_data.label),
-                                    BC::ReturnCall(data.args.len() as Argc - func.info.arity),
+                                    BC::ReturnCall(data.args.len() as Argc - func_data.arity),
                                 ]);
                                 if let Some(_) = data.tail_call {
                                     out.extend([
@@ -416,17 +392,17 @@ impl Function {
                 return out
             }
 
-            Function{data: FnData::Literal(data), ..} => {
+            Function::Literal(data) => {
                 data.data_label = ctx.data.len() as Label;
                 ctx.data.push(data.value.clone());
                 out.push(BC::Load(data.data_label));
             }
 
-            Function{data: FnData::Unknown, ..} => {
-                let func = ctx.get(&self.info.name).unwrap();
+            Function::Unknown(name) => {
+                let func = ctx.get(&name).unwrap();
                 let func = func.borrow();
 
-                out.extend(Function::fn_as_value(&func.data));
+                out.extend(Function::fn_as_value(&func));
             }
 
             _ => ()
@@ -434,21 +410,21 @@ impl Function {
         return out
     }
 
-    fn fn_as_value(data: &FnData) -> Vec<BC> {
+    fn fn_as_value(data: &Function) -> Vec<BC> {
         match data {
-            FnData::Arg(arg_data) => {
+            Function::Arg(arg_data) => {
                 return vec![
                     BC::Arg(arg_data.index),
                 ];
             }
 
-            FnData::Builtin(func_data) => {
+            Function::Builtin(func_data) => {
                 return vec![
                     BC::PushIns(func_data.opcode.clone()),
                 ];
             }
 
-            FnData::Definition(func_data) => {
+            Function::Definition(func_data) => {
                 return vec![
                     BC::PushFn(func_data.label as Addr),
                 ];
@@ -462,22 +438,22 @@ impl Function {
 
 impl std::fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match &self.data {
-            FnData::Call(data) => {
-                write!(f, "({}", self.info.name)?;
+        match &self {
+            Function::Call(data) => {
+                write!(f, "({}", data.name)?;
                 for arg in &data.args {
                     write!(f, " {}", arg)?;
                 }
                 write!(f, ")")
             },
 
-            FnData::Arg(..) => write!(f, "{}", self.info.name),
-            FnData::Unknown => write!(f, "{}", self.info.name),
+            Function::Arg(data) => write!(f, "{}", data.name),
+            Function::Unknown(name) => write!(f, "{}", name),
 
-            FnData::Definition(data) => {
+            Function::Definition(data) => {
                 write!(f, "(def")?;
                 for (args, body) in &data.defs {
-                    write!(f, "\n  ({}", self.info.name)?;
+                    write!(f, "\n  ({}", data.name)?;
                     for a in args {
                         write!(f, " {}", a)?;
                     }
@@ -486,7 +462,7 @@ impl std::fmt::Display for Function {
                 write!(f, ")")
             }
 
-            FnData::Literal(data) => write!(f, "{}", data.value),
+            Function::Literal(data) => write!(f, "{}", data.value),
 
             _ => write!(f, "{:?}", self)
         }

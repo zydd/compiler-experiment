@@ -59,11 +59,11 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
                     }
                     state = stack.pop().unwrap();
 
-                    cur = if new.list[0].info.name == "def" {
-                        Some(FunctionDefinition::new(new.list))
+                    if matches!(&new.list[0], Function::Unknown(name) if name == "def") {
+                        cur = Some(FunctionDefinition::new(new.list))
                     } else {
-                        Some(FunctionCall::new(new.list))
-                    };
+                        cur = Some(FunctionCall::new(new.list))
+                    }
                 },
                 "]" => {
                     let new = state;
@@ -98,7 +98,7 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
             Some(mut cur) => {
                 if state.defer_next {
                     state.defer_next = false;
-                    cur.info.deferred = true;
+                    cur.call_mut().unwrap().deferred = true;
                 }
                 state.list.push(cur);
             },
