@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::bytecode::*;
 
 type Label = Addr;
-
+type FunctionRef = std::rc::Rc<std::cell::RefCell<Function>>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionArg {
@@ -24,7 +24,7 @@ pub struct FunctionCall {
     name: String,
     argc: Argc,
     label: Label,
-    args: Vec<Function>,
+    args: Vec<FunctionRef>,
     tail_call: Option<Argc>,
     pub deferred: bool,
 }
@@ -34,7 +34,7 @@ pub struct FunctionDefinition {
     name: String,
     arity: Argc,
     label: Label,
-    defs: Vec<(Vec<Function>, Function)>
+    defs: Vec<(Vec<FunctionRef>, FunctionRef)>
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,7 +57,7 @@ pub enum Function {
 pub struct Context {
     label_index: Label,
     data: Vec<Value>,
-    scope: Vec<HashMap<String, std::rc::Rc<std::cell::RefCell<Function>>>>,
+    scope: Vec<HashMap<String, FunctionRef>>,
 }
 
 
@@ -72,12 +72,12 @@ impl Context {
         macro_rules! builtin {
             ($instr: ident, $arity: expr, $func: literal) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, $func.to_string()));
-                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
+                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, $func.to_string()).to_ref());
+                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()).to_ref());
             };
             ($instr: ident, $arity: expr) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set(long_name.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
+                new.set(long_name.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()).to_ref());
             };
         }
 
@@ -111,7 +111,7 @@ impl Context {
         return label
     }
 
-    fn get(&self, key: &String) -> Option<std::rc::Rc<std::cell::RefCell<Function>>> {
+    fn get(&self, key: &String) -> Option<FunctionRef> {
         for scope in self.scope.iter().rev() {
             if let Some(v) = scope.get(key) {
                 return Some(v.clone())
@@ -123,12 +123,9 @@ impl Context {
         return None
     }
 
-    fn set(&mut self, name: String, function: Function) -> std::rc::Rc<std::cell::RefCell<Function>> {
+    fn set(&mut self, name: String, function: FunctionRef) {
         let current = self.scope.last_mut().unwrap();
-
-        let function = std::rc::Rc::new(std::cell::RefCell::new(function));
         current.insert(name, function.clone());
-        return function
     }
 
     fn enter(&mut self) {
@@ -180,7 +177,7 @@ impl FunctionDefinition {
             assert_eq!(call.name, func.name);
             assert_eq!(matches!(&def[0], Function::Call{..}), true);
 
-            func.defs.push((call.args.clone(), def[1].clone()));
+            func.defs.push((call.args.clone(), def[1].clone().to_ref()));
         }
 
         return Function::Definition(func)
@@ -197,7 +194,7 @@ impl FunctionCall {
                 name: name.clone(),
                 argc: (expr.len() - 1) as Argc,
                 label: 0,
-                args: expr[1..].to_vec(),
+                args: expr[1..].iter().map(|x| x.clone().to_ref()).collect(),
                 tail_call: None,
                 deferred: false,
             })
@@ -250,29 +247,33 @@ impl Function {
     //     }
     // }
 
-    fn compile(&mut self, ctx: &mut Context) -> Vec<BC> {
+    fn to_ref(self) -> FunctionRef {
+        std::rc::Rc::new(std::cell::RefCell::new(self))
+    }
+
+    fn compile(ctx: &mut Context, function: FunctionRef) -> Vec<BC> {
         let mut out = Vec::new();
 
-        match self {
-            Function::Definition(data) => {
-                data.label = ctx.new_label();
-                ctx.set(data.name.clone(), Function::Definition(data.clone()));
+        match &mut *function.borrow_mut() {
+            Function::Definition(fndef) => {
+                fndef.label = ctx.new_label();
+                ctx.set(fndef.name.clone(), Function::Definition(fndef.clone()).to_ref());
 
                 let fn_end = ctx.new_label();
                 out.extend([
                     BC::Jump(fn_end),
-                    BC::Label(data.label),
+                    BC::Label(fndef.label),
                 ]);
                 ctx.enter();
 
-                for (args, def) in &mut data.defs {
+                for (args, def) in &fndef.defs {
                     let case_end = ctx.new_label();
                     ctx.enter();
 
-                    for (i, mut arg) in args.iter_mut().enumerate() {
-                        match &mut arg {
+                    for (i, arg) in args.iter().enumerate() {
+                        match &*arg.borrow() {
                             Function::Unknown(name) => if name != "_" {
-                                ctx.set(name.clone(), FunctionArg::new(i as Argc, name.clone()));
+                                ctx.set(name.clone(), FunctionArg::new(i as Argc, name.clone()).to_ref());
                             }
 
                             Function::Literal(literal) => {
@@ -290,14 +291,14 @@ impl Function {
                         }
                     }
 
-                    if let Function::Call(call) = def {
+                    if def.borrow().call().is_some() {
                         // tail_call makes the Call responsible for handling the return
-                        call.tail_call = Some(data.arity);
-                        out.extend(def.compile(ctx));
+                        def.borrow_mut().call_mut().unwrap().tail_call = Some(fndef.arity);
+                        out.extend(Function::compile(ctx, def.clone()));
                     } else {
-                        out.extend(def.compile(ctx));
+                        out.extend(Function::compile(ctx, def.clone()));
                         out.extend([
-                            BC::Return(data.arity),
+                            BC::Return(fndef.arity),
                         ]);
                     }
 
@@ -310,25 +311,25 @@ impl Function {
                 ]);
             }
 
-            Function::Call(data) => {
-                let func = ctx.get(&data.name).expect(&data.name);
-                let func = func.borrow_mut();
+            Function::Call(call) => {
+                let func = ctx.get(&call.name).expect(&call.name);
+                let func = func.borrow();
 
                 // compute args
-                for arg in data.args.iter_mut().rev() {
-                    out.extend(arg.compile(ctx));
+                for arg in call.args.iter().rev() {
+                    out.extend(Function::compile(ctx, arg.clone()));
                 }
 
-                if data.deferred {
+                if call.deferred {
                     out.extend(Function::fn_as_value(&func));
-                    out.push(BC::Defer(data.args.len() as Argc + 1));
+                    out.push(BC::Defer(call.args.len() as Argc + 1));
                 } else {
                     match &*func {
                         Function::Arg(arg_data) => {
                             out.extend([
                                 BC::Arg(arg_data.index),
                             ]);
-                            if let Some(move_args) = data.tail_call {
+                            if let Some(move_args) = call.tail_call {
                                 out.extend([
                                     BC::MoveArgs(move_args),
                                 ]);
@@ -336,7 +337,7 @@ impl Function {
                             out.extend([
                                 BC::Builtin(BuiltinFunction::Invoke),
                             ]);
-                            if data.tail_call.is_some() {
+                            if call.tail_call.is_some() {
                                 out.extend([
                                     BC::Return(0),
                                 ]);
@@ -348,7 +349,7 @@ impl Function {
                                 BC::Builtin(func_data.opcode.clone()),
                             ]);
 
-                            if let Some(move_args) = data.tail_call {
+                            if let Some(move_args) = call.tail_call {
                                 out.extend([
                                     BC::Return(move_args),
                                 ]);
@@ -356,25 +357,25 @@ impl Function {
                         }
 
                         Function::Definition(func_data) => {
-                            if let Some(move_args) = data.tail_call {
+                            if let Some(move_args) = call.tail_call {
                                 out.extend([
                                     BC::MoveArgs(move_args),
                                 ]);
                             }
 
-                            if data.args.len() > func_data.arity as usize {
+                            if call.args.len() > func_data.arity as usize {
                                 // do not Jump if "over-currying"
                                 out.extend([
                                     BC::Call(func_data.label),
-                                    BC::ReturnCall(data.args.len() as Argc - func_data.arity),
+                                    BC::ReturnCall(call.args.len() as Argc - func_data.arity),
                                 ]);
-                                if let Some(_) = data.tail_call {
+                                if let Some(_) = call.tail_call {
                                     out.extend([
                                         // if tail_call is set, the return of the callee is handled here
                                         BC::Return(0),
                                     ]);
                                 }
-                            } else if let Some(_) = data.tail_call {
+                            } else if let Some(_) = call.tail_call {
                                 out.extend([
                                     BC::Jump(func_data.label),
                                 ]);
@@ -392,10 +393,10 @@ impl Function {
                 return out
             }
 
-            Function::Literal(data) => {
-                data.data_label = ctx.data.len() as Label;
-                ctx.data.push(data.value.clone());
-                out.push(BC::Load(data.data_label));
+            Function::Literal(literal) => {
+                literal.data_label = ctx.data.len() as Label;
+                ctx.data.push(literal.value.clone());
+                out.push(BC::Load(literal.data_label));
             }
 
             Function::Unknown(name) => {
@@ -442,7 +443,7 @@ impl std::fmt::Display for Function {
             Function::Call(data) => {
                 write!(f, "({}", data.name)?;
                 for arg in &data.args {
-                    write!(f, " {}", arg)?;
+                    write!(f, " {}", arg.borrow())?;
                 }
                 write!(f, ")")
             },
@@ -455,9 +456,9 @@ impl std::fmt::Display for Function {
                 for (args, body) in &data.defs {
                     write!(f, "\n  ({}", data.name)?;
                     for a in args {
-                        write!(f, " {}", a)?;
+                        write!(f, " {}", a.borrow())?;
                     }
-                    write!(f, ") {}", body)?;
+                    write!(f, ") {}", body.borrow())?;
                 }
                 write!(f, ")")
             }
@@ -518,13 +519,13 @@ fn link(program: &mut Vec<BC>) {
 }
 
 
-pub fn compile(ast: &mut [Function]) -> (Vec<BC>, Vec<Value>) {
+pub fn compile(mut ast: Vec<Function>) -> (Vec<BC>, Vec<Value>) {
     let mut out: Vec<BC> = Vec::new();
 
     let mut ctx = Context::new();
 
-    for el in ast {
-        out.extend(el.compile(&mut ctx));
+    for el in ast.drain(..) {
+        out.extend(Function::compile(&mut ctx, el.to_ref()));
     }
     println!("\n{:?}\n", out);
 
