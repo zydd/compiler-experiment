@@ -182,6 +182,66 @@ impl FunctionDefinition {
 
         return Function::Definition(func)
     }
+
+    fn compile(&mut self, ctx: &mut Context) -> Vec<BC> {
+        let mut out = Vec::new();
+
+        self.label = ctx.new_label();
+        ctx.set(self.name.clone(), Function::Definition(self.clone()).to_ref());
+
+        let fn_end = ctx.new_label();
+        out.extend([
+            BC::Jump(fn_end),
+            BC::Label(self.label),
+        ]);
+        ctx.enter();
+
+        for (args, def) in &self.defs {
+            let case_end = ctx.new_label();
+            ctx.enter();
+
+            for (i, arg) in args.iter().enumerate() {
+                match &*arg.borrow() {
+                    Function::Unknown(name) => if name != "_" {
+                        ctx.set(name.clone(), FunctionArg::new(i as Argc, name.clone()).to_ref());
+                    }
+
+                    Function::Literal(literal) => {
+                        let addr = ctx.data.len() as Addr;
+                        ctx.data.push(Value::try_from(literal.value.clone()).unwrap());
+
+                        out.extend([
+                            BC::Load(addr),
+                            BC::Arg(i as Argc),
+                            BC::Bne(case_end),
+                        ]);
+                    }
+
+                    _ => todo!()
+                }
+            }
+
+            if def.borrow().call().is_some() {
+                // tail_call makes the Call responsible for handling the return
+                def.borrow_mut().call_mut().unwrap().tail_call = Some(self.arity);
+                out.extend(Function::compile(ctx, def.clone()));
+            } else {
+                out.extend(Function::compile(ctx, def.clone()));
+                out.extend([
+                    BC::Return(self.arity),
+                ]);
+            }
+
+            out.push(BC::Label(case_end));
+            ctx.exit();
+        }
+        out.extend([
+            BC::Builtin(BuiltinFunction::Except),
+            BC::Label(fn_end),
+        ]);
+
+        return out
+    }
 }
 
 impl FunctionCall {
@@ -201,6 +261,90 @@ impl FunctionCall {
         } else {
             panic!()
         }
+    }
+
+    fn compile(&mut self, ctx: &mut Context) -> Vec<BC> {
+        let mut out = Vec::new();
+
+        let func = ctx.get(&self.name).expect(&self.name);
+        let func = func.borrow();
+
+        // compute args
+        for arg in self.args.iter().rev() {
+            out.extend(Function::compile(ctx, arg.clone()));
+        }
+
+        if self.deferred {
+            out.extend(Function::fn_as_value(&func));
+            out.push(BC::Defer(self.args.len() as Argc + 1));
+        } else {
+            match &*func {
+                Function::Arg(arg_data) => {
+                    out.extend([
+                        BC::Arg(arg_data.index),
+                    ]);
+                    if let Some(move_args) = self.tail_call {
+                        out.extend([
+                            BC::MoveArgs(move_args),
+                        ]);
+                    }
+                    out.extend([
+                        BC::Builtin(BuiltinFunction::Invoke),
+                    ]);
+                    if self.tail_call.is_some() {
+                        out.extend([
+                            BC::Return(0),
+                        ]);
+                    }
+                }
+
+                Function::Builtin(func_data) => {
+                    out.extend([
+                        BC::Builtin(func_data.opcode.clone()),
+                    ]);
+
+                    if let Some(move_args) = self.tail_call {
+                        out.extend([
+                            BC::Return(move_args),
+                        ]);
+                    }
+                }
+
+                Function::Definition(func_data) => {
+                    if let Some(move_args) = self.tail_call {
+                        out.extend([
+                            BC::MoveArgs(move_args),
+                        ]);
+                    }
+
+                    if self.args.len() > func_data.arity as usize {
+                        // do not Jump if "over-currying"
+                        out.extend([
+                            BC::Call(func_data.label),
+                            BC::ReturnCall(self.args.len() as Argc - func_data.arity),
+                        ]);
+                        if let Some(_) = self.tail_call {
+                            out.extend([
+                                // if tail_call is set, the return of the callee is handled here
+                                BC::Return(0),
+                            ]);
+                        }
+                    } else if let Some(_) = self.tail_call {
+                        out.extend([
+                            BC::Jump(func_data.label),
+                        ]);
+                    } else {
+                        out.extend([
+                            BC::Call(func_data.label),
+                        ]);
+                    }
+                }
+
+                _ => panic!()
+            }
+        }
+
+        return out
     }
 }
 
@@ -255,151 +399,16 @@ impl Function {
         let mut out = Vec::new();
 
         match &mut *function.borrow_mut() {
-            Function::Definition(fndef) => {
-                fndef.label = ctx.new_label();
-                ctx.set(fndef.name.clone(), Function::Definition(fndef.clone()).to_ref());
+            Function::Definition(fndef) => out.extend(fndef.compile(ctx)),
+            Function::Call(call)        => out.extend(call.compile(ctx)),
 
-                let fn_end = ctx.new_label();
-                out.extend([
-                    BC::Jump(fn_end),
-                    BC::Label(fndef.label),
-                ]);
-                ctx.enter();
-
-                for (args, def) in &fndef.defs {
-                    let case_end = ctx.new_label();
-                    ctx.enter();
-
-                    for (i, arg) in args.iter().enumerate() {
-                        match &*arg.borrow() {
-                            Function::Unknown(name) => if name != "_" {
-                                ctx.set(name.clone(), FunctionArg::new(i as Argc, name.clone()).to_ref());
-                            }
-
-                            Function::Literal(literal) => {
-                                let addr = ctx.data.len() as Addr;
-                                ctx.data.push(Value::try_from(literal.value.clone()).unwrap());
-
-                                out.extend([
-                                    BC::Load(addr),
-                                    BC::Arg(i as Argc),
-                                    BC::Bne(case_end),
-                                ]);
-                            }
-
-                            _ => todo!()
-                        }
-                    }
-
-                    if def.borrow().call().is_some() {
-                        // tail_call makes the Call responsible for handling the return
-                        def.borrow_mut().call_mut().unwrap().tail_call = Some(fndef.arity);
-                        out.extend(Function::compile(ctx, def.clone()));
-                    } else {
-                        out.extend(Function::compile(ctx, def.clone()));
-                        out.extend([
-                            BC::Return(fndef.arity),
-                        ]);
-                    }
-
-                    out.push(BC::Label(case_end));
-                    ctx.exit();
-                }
-                out.extend([
-                    BC::Builtin(BuiltinFunction::Except),
-                    BC::Label(fn_end),
-                ]);
-            }
-
-            Function::Call(call) => {
-                let func = ctx.get(&call.name).expect(&call.name);
-                let func = func.borrow();
-
-                // compute args
-                for arg in call.args.iter().rev() {
-                    out.extend(Function::compile(ctx, arg.clone()));
-                }
-
-                if call.deferred {
-                    out.extend(Function::fn_as_value(&func));
-                    out.push(BC::Defer(call.args.len() as Argc + 1));
-                } else {
-                    match &*func {
-                        Function::Arg(arg_data) => {
-                            out.extend([
-                                BC::Arg(arg_data.index),
-                            ]);
-                            if let Some(move_args) = call.tail_call {
-                                out.extend([
-                                    BC::MoveArgs(move_args),
-                                ]);
-                            }
-                            out.extend([
-                                BC::Builtin(BuiltinFunction::Invoke),
-                            ]);
-                            if call.tail_call.is_some() {
-                                out.extend([
-                                    BC::Return(0),
-                                ]);
-                            }
-                        }
-
-                        Function::Builtin(func_data) => {
-                            out.extend([
-                                BC::Builtin(func_data.opcode.clone()),
-                            ]);
-
-                            if let Some(move_args) = call.tail_call {
-                                out.extend([
-                                    BC::Return(move_args),
-                                ]);
-                            }
-                        }
-
-                        Function::Definition(func_data) => {
-                            if let Some(move_args) = call.tail_call {
-                                out.extend([
-                                    BC::MoveArgs(move_args),
-                                ]);
-                            }
-
-                            if call.args.len() > func_data.arity as usize {
-                                // do not Jump if "over-currying"
-                                out.extend([
-                                    BC::Call(func_data.label),
-                                    BC::ReturnCall(call.args.len() as Argc - func_data.arity),
-                                ]);
-                                if let Some(_) = call.tail_call {
-                                    out.extend([
-                                        // if tail_call is set, the return of the callee is handled here
-                                        BC::Return(0),
-                                    ]);
-                                }
-                            } else if let Some(_) = call.tail_call {
-                                out.extend([
-                                    BC::Jump(func_data.label),
-                                ]);
-                            } else {
-                                out.extend([
-                                    BC::Call(func_data.label),
-                                ]);
-                            }
-                        }
-
-                        _ => panic!()
-                    }
-                }
-
-                return out
-            }
-
-            Function::Literal(literal) => {
+            Function::Literal(literal)  => {
                 literal.data_label = ctx.data.len() as Label;
                 ctx.data.push(literal.value.clone());
                 out.push(BC::Load(literal.data_label));
             }
 
-            Function::Unknown(name) => {
+            Function::Unknown(name)     => {
                 let func = ctx.get(&name).unwrap();
                 let func = func.borrow();
 
