@@ -281,7 +281,7 @@ impl FunctionDefinition {
             }
         }
 
-        return std::rc::Rc::try_unwrap(self.body).ok().unwrap().into_inner()
+        return self.body.borrow().clone()
     }
 
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
