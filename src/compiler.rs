@@ -57,6 +57,7 @@ pub struct FunctionMatch {
 
 // #[derive(Debug)]
 pub enum Function {
+    // TODO: test Arg(std::rc::Rc<std::cell::RefCell<FunctionArg>>),
     Arg(FunctionArg),
     ArgRef(FunctionRef),
     Builtin(FunctionBuiltin),
@@ -369,6 +370,8 @@ impl FunctionCall {
             let mut inlined = callee.clone().inline(&self.args);
             Function::flag_tail_call(&mut inlined, self.tail_call);
             return Some(inlined)
+        } else {
+            todo!();
         }
 
         return None
@@ -752,11 +755,19 @@ impl Function {
                 Function::Literal(literal)  => literal.annotate(ctx),
 
                 Function::Unknown(name) => {
-                    let func = ctx.get(&name).unwrap();
-                    let mut func_mut = &mut *func.borrow_mut();
-                    match &mut func_mut {
+                    let func_ref = ctx.get(&name).unwrap();
+
+                    // if func_ref is already borrowed, assume it's a function definition
+                    // referencing itself
+                    if func_ref.try_borrow().is_err() {
+                        *function_mut = Function::FunctionRef(func_ref.clone());
+                        return
+                    }
+
+                    let mut func = &mut *func_ref.borrow_mut();
+                    match &mut func {
                         Function::Arg(arg_data) => {
-                            *function_mut = Function::ArgRef(func.clone());
+                            *function_mut = Function::ArgRef(func_ref.clone());
                             arg_data.refs.push(function.clone());
                         },
 
@@ -766,14 +777,14 @@ impl Function {
                         },
 
                         Function::Definition(_) => {
-                            *function_mut = Function::FunctionRef(func.clone());
+                            *function_mut = Function::FunctionRef(func_ref.clone());
                         }
 
                         Function::Builtin(func) => {
                             *function_mut = Function::Builtin(func.clone());
                         }
 
-                        _ => panic!("Unkn: {} {}", name, func_mut),
+                        _ => panic!("Unkn: {} {}", name, func),
                     }
                 }
 
@@ -986,7 +997,7 @@ impl Clone for Function {
             Function::Match(data)       => Function::Match(data.clone()),
             Function::Unknown(data)     => Function::Unknown(data.clone()),
             Function::Local(data)       => Function::Local(data.clone()),
-            _ => todo!("{}", self)
+            Function::FunctionRef(data) => Function::FunctionRef(data.clone()),
         }
     }
 }
