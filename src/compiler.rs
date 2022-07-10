@@ -550,12 +550,11 @@ impl FunctionMatch {
 
             out.extend(Function::compile(ctx, body.clone()));
 
-            if body.borrow().is_value() {
-                if let Some(move_args) = self.tail_call {
-                    out.extend([
-                        BC::Return(move_args),
-                    ]);
-                }
+            if body.borrow().is_value() && self.tail_call.is_some() {
+                let move_args = self.tail_call.unwrap();
+                out.extend([
+                    BC::Return(move_args),
+                ]);
             } else {
                 out.extend([
                     BC::Jump(match_end),
@@ -569,9 +568,10 @@ impl FunctionMatch {
         }
 
         out.extend([
+            BC::Builtin(BuiltinFunction::Except),
             BC::Label(match_end),
         ]);
-        
+
         return out
     }
 }
@@ -737,7 +737,7 @@ impl Function {
                                 }
 
                                 Function::Literal(literal) => literal.annotate(ctx),
-                
+
                                 _ => todo!()
                             }
                         }
