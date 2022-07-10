@@ -5,7 +5,6 @@ use crate::compiler::*;
 use crate::bytecode::Value;
 
 
-#[derive(Debug)]
 struct ParserState {
     par: Option<char>,
     defer_next: bool,

@@ -15,11 +15,11 @@ fn main() {
 
     let ast = parser::parse(code).expect("parse error");
 
-    for topnode in &ast {
-        println!("{}", topnode);
-    }
+    // for topnode in &ast {
+    //     println!("{}", topnode);
+    // }
     let comp = compiler::compile(ast);
-    // println!("\n{:?}\n", comp.0);
+    println!("\n{:?}\n", comp.1);
 
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {

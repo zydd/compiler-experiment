@@ -1,6 +1,6 @@
 // type SString = smartstring::SmartString::<smartstring::Compact>;
 pub type Addr = u32;
-pub type Argc = u16;
+pub type Argc = i16;
 type ListType = std::collections::VecDeque<Value>;
 type IntType = isize;
 type FloatType = f64;
@@ -49,6 +49,7 @@ pub enum BC {
     Pop(Argc),
     PushFn(Addr),
     PushIns(BuiltinFunction),
+    PushInt(i32),
     Return(Argc),
     ReturnCall(Argc),
 }
@@ -348,6 +349,7 @@ impl Arch {
                 Pop(n)          => self.pop(n),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),
                 PushIns(func)   => self.stack.push(Value::Builtin(func)),
+                PushInt(i)      => self.stack.push(Value::Int(i as IntType)),
                 Return(argc)    => {self.stdreturn(argc); break},
                 ReturnCall(argc) => self.returncall(argc),
             }
@@ -355,9 +357,7 @@ impl Arch {
     }
 }
 
-pub fn execute(mut prog: Vec<BC>, data: Vec<Value>) {
-    prog.push(BC::Return(0));
-
+pub fn execute(prog: Vec<BC>, data: Vec<Value>) {
     let mut arch = Arch::new(prog, data);
     arch.exec();
 
