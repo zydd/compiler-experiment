@@ -1100,7 +1100,7 @@ pub fn compile(ast: Vec<Function>) -> (Vec<BC>, Vec<Value>) {
 
     let mut out: Vec<BC> = Vec::new();
     for el in ast.iter_mut() {
-        if el.borrow().is_executable() {
+        if el.borrow().definition().is_none() {
             out.extend(Function::compile(&mut ctx, el.clone()));
         }
     }
