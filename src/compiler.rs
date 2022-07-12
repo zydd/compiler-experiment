@@ -686,6 +686,7 @@ impl Function {
                 Function::ArgRef(_)     => (),
                 Function::Builtin(_)    => (),
                 Function::Local(_)      => (),
+                Function::FunctionRef(_) => (),
 
                 Function::Call(call) => {
                     for arg in &call.args {
