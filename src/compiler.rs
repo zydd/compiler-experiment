@@ -387,6 +387,10 @@ impl FunctionCall {
         }
 
         if self.deferred {
+            if !ctx.used_definitions.iter().any(|x| FunctionRef::ptr_eq(x, func)) {
+                ctx.used_definitions.push(func.clone());
+            }
+
             out.extend(func.borrow().compile_as_value());
             out.extend([
                 BC::Defer(self.args.len() as Argc + 1)
