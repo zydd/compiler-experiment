@@ -709,8 +709,13 @@ impl Function {
                         }
 
                         call.function = Some(func_ref.clone());
-                    } else if call.function.as_ref().unwrap().borrow().arg().is_some() {
-                        Function::annotate(ctx, call.function.as_ref().unwrap().clone());
+                    } else {
+                        let callee_ref = call.function.as_ref().unwrap();
+                        if let Ok(callee) = callee_ref.try_borrow() {
+                            if callee.arg().is_some() {
+                                Function::annotate(ctx, callee_ref.clone());
+                            }
+                        }
                     }
 
                     if !call.recursive {
@@ -1017,7 +1022,8 @@ impl Clone for FunctionCall {
         };
 
         if let Some(func) = &mut call.function {
-            if matches!(&*func.borrow(), Function::ArgRef(_)) {
+            // assume it's a recursive call if already borrowed
+            if func.try_borrow().is_ok() && matches!(&*func.borrow(), Function::ArgRef(_)) {
                 let mut func_ref = func.borrow_mut();
                 // if the callee is an ArgRef, convert it to Arg so it can be relinked by annotate
                 *func_ref = func_ref.clone();
