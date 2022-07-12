@@ -715,8 +715,8 @@ impl Function {
                         call.function = Some(func_ref.clone());
                     } else {
                         let callee_ref = call.function.as_ref().unwrap();
-                        if let Ok(callee) = callee_ref.try_borrow() {
-                            if callee.arg().is_some() {
+                        if callee_ref.try_borrow_mut().is_ok() {
+                            if callee_ref.borrow_mut().arg().is_some() {
                                 Function::annotate(ctx, callee_ref.clone());
                             }
                         }
