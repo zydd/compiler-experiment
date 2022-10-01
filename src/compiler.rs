@@ -812,13 +812,16 @@ impl Function {
         let function_ref = &*function.borrow();
         match function_ref {
             Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().arg().unwrap().index)),
-            // Function::Arg(arg)          => out.push(BC::Arg(arg.index)),
             Function::Call(call)        => out.extend(call.compile(ctx)),
             Function::Builtin(_)        => out.extend(function_ref.compile_as_value()),
             Function::Definition(fndef) => out.extend(fndef.compile(ctx)),
             Function::Literal(_)        => out.extend(function_ref.compile_as_value()),
             Function::Match(fnmatch)    => out.extend(fnmatch.compile(ctx)),
-            _ => panic!("{}", function_ref),
+            // Function::Arg(arg)          => out.push(BC::Arg(arg.index)),
+            Function::Arg(_)            => panic!(),
+            Function::FunctionRef(func) => out.extend(func.borrow().compile_as_value()),
+            Function::Local(_)          => panic!(),
+            Function::Unknown(_)        => panic!(),
         }
 
         return out
