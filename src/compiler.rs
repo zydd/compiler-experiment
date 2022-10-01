@@ -381,9 +381,16 @@ impl FunctionCall {
     // }
 
     fn annotate(ctx: &mut Context, function: &mut Function) {
-        let mut call = function.call().unwrap().borrow_mut();
+        let mut call = &mut *function.call().unwrap().borrow_mut();
 
         for mut arg in &mut call.args {
+            // Propagate down `deferred` tag
+            if call.deferred {
+                if let Function::Call(arg_call) = &mut arg {
+                arg_call.borrow_mut().deferred = true;
+                }
+            }
+
             Function::annotate(ctx, &mut arg);
         }
 
@@ -719,7 +726,7 @@ impl Function {
             Function::Literal(_)    => true,
             Function::Local(_)      => true,
 
-            Function::Call(_)       => false,
+            Function::Call(call)    => call.borrow().deferred,
             Function::Definition(_) => panic!(),
             Function::Match(_)      => false,
 
@@ -888,6 +895,10 @@ impl std::fmt::Display for Function {
                     fmt_fn_name(f, data.function.as_ref().unwrap())?;
                 } else {
                     write!(f, "{}[?]", data.name)?;
+                }
+
+                if data.deferred {
+                    write!(f, "[d]")?;
                 }
 
                 if data.recursive {
@@ -1124,7 +1135,7 @@ pub fn compile(ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Value>) {
         def += 1;
     }
 
-    // println!("\n{:?}\n", out);
+    println!("\n{:?}\n", out);
 
     link(&mut out);
 
