@@ -850,6 +850,12 @@ impl Function {
                 ];
             }
 
+            Function::FunctionRef(func_data) => {
+                return vec![
+                    BC::PushFn(func_data.borrow().label as Addr),
+                ];
+            }
+
             Function::Literal(literal) => {
                 if let Value::Int(i) = literal.borrow().value {
                     return vec![
@@ -1128,11 +1134,16 @@ pub fn compile(ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Value>) {
         BC::Return(0),
     ]);
 
-    let mut def = 0;
-    while def < ctx.used_definitions.len() {
-        let func = ctx.used_definitions[def].clone();
-        out.extend(Function::compile(&mut ctx, Function::Definition(func)));
-        def += 1;
+    // let mut def = 0;
+    // while def < ctx.used_definitions.len() {
+    //     let func = ctx.used_definitions[def].clone();
+    //     out.extend(Function::compile(&mut ctx, Function::Definition(func)));
+    //     def += 1;
+    // }
+    for el in ast.iter_mut() {
+        if el.definition().is_some() {
+            out.extend(Function::compile(&mut ctx, el.clone()));
+        }
     }
 
     println!("\n{:?}\n", out);

@@ -27,7 +27,7 @@
 (assert_sum 100)
 
 
-(def 
+(def
     (foldr func accum [])
         accum
 
@@ -35,3 +35,12 @@
         (func (car lst) '(foldr func accum (cdr lst)))
 )
 (assert_eq 10 (foldr + 0 [1 2 3 4]))
+
+(def
+    (foldl func accum [])
+        accum
+
+    (foldl func accum lst)
+        '(foldl func (func accum (car lst)) (cdr lst))
+)
+(assert_eq 6 (foldl + 0 [1 2 3]))
