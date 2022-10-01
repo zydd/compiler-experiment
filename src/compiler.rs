@@ -15,14 +15,14 @@ pub struct FunctionArg {
 #[derive(Clone, Debug)]
 pub struct FunctionBuiltin {
     name: String,
-    arity: Argc,
+    // arity: Argc,
     opcode: BuiltinFunction,
 }
 
 #[derive(Debug)]
 pub struct FunctionCall {
     name: String,
-    argc: Argc,
+    // argc: Argc,
     function: Option<Function>,
     args: Vec<Function>,
     tail_call: Option<Argc>,
@@ -66,7 +66,7 @@ pub enum Function {
     Definition(RcRc<FunctionDefinition>),
     FunctionRef(RcRc<FunctionDefinition>),
     Literal(RcRc<FunctionLiteral>),
-    Local(RcRc<FunctionArg>),
+    // Local(RcRc<FunctionArg>),
     Match(RcRc<FunctionMatch>),
     Unknown(String),
 }
@@ -83,14 +83,14 @@ impl<T> ToRcRc for T {
 
 
 pub struct CompileStack {
-    func: Function,
+    // func: Function,
     scope: HashMap<String, Function>
 }
 
 impl CompileStack {
-    pub fn new(func: Function) -> CompileStack {
+    pub fn new(_func: Function) -> CompileStack {
         CompileStack {
-            func: func,
+            // func: func,
             scope: HashMap::new(),
         }
     }
@@ -193,18 +193,14 @@ impl FunctionArg {
             refs: 0,
         }
     }
-
-    pub fn to_arg(self) -> Function {
-        Function::Arg(self.to_rcrc())
-    }
 }
 
 impl FunctionBuiltin {
-    pub fn new(id: BuiltinFunction, arity: Argc, name: String) -> Function {
+    pub fn new(id: BuiltinFunction, _arity: Argc, name: String) -> Function {
         return Function::Builtin(FunctionBuiltin {
             opcode: id,
             name: name,
-            arity: arity,
+            // arity: arity,
         }.to_rcrc())
     }
 }
@@ -320,7 +316,7 @@ impl FunctionCall {
         if let Function::Unknown(name) = &expr[0] {
             return Function::Call(FunctionCall {
                 name: name.clone(),
-                argc: (expr.len() - 1) as Argc,
+                // argc: (expr.len() - 1) as Argc,
                 function: None,
                 args: expr.into_iter().skip(1).collect(),
                 tail_call: None,
@@ -676,12 +672,12 @@ impl Function {
         }
     }
 
-    pub fn into_arg(self) -> Option<RcRc<FunctionArg>> {
-        match self {
-            Function::Arg(fnref) => Some(fnref),
-            _ => None
-        }
-    }
+    // pub fn into_arg(self) -> Option<RcRc<FunctionArg>> {
+    //     match self {
+    //         Function::Arg(fnref) => Some(fnref),
+    //         _ => None
+    //     }
+    // }
 
     pub fn call(&self) -> Option<&RcRc<FunctionCall>> {
         match self {
@@ -725,7 +721,7 @@ impl Function {
             Function::Builtin(_)    => true,
             Function::FunctionRef(_) => true,
             Function::Literal(_)    => true,
-            Function::Local(_)      => true,
+            // Function::Local(_)      => true,
 
             Function::Call(call)    => call.borrow().deferred,
             Function::Definition(_) => panic!(),
@@ -735,14 +731,14 @@ impl Function {
         }
     }
 
-    pub fn is_executable(&self) -> bool {
-        match self {
-            Function::Call(_)   => true,
-            Function::Match(_)  => true,
+    // pub fn is_executable(&self) -> bool {
+    //     match self {
+    //         Function::Call(_)   => true,
+    //         Function::Match(_)  => true,
 
-            _ => false,
-        }
-    }
+    //         _ => false,
+    //     }
+    // }
 
     fn flag_tail_call(func: &Function, tail_call: Option<Argc>) {
         match func {
@@ -757,7 +753,7 @@ impl Function {
             Function::Arg(_)        => (),
             Function::ArgRef(_)     => (),
             Function::Builtin(_)    => (),
-            Function::Local(_)      => (),
+            // Function::Local(_)      => (),
             Function::FunctionRef(_) => (),
 
             Function::Call(_)       => FunctionCall::annotate(ctx, function),
@@ -805,8 +801,6 @@ impl Function {
                     _ => panic!("Unkn: {} {}", name, function),
                 }
             }
-
-            other => todo!("{}", other)
         }
 
     }
@@ -823,8 +817,8 @@ impl Function {
             Function::Match(fnmatch)    => out.extend(fnmatch.borrow().compile(ctx)),
             // Function::Arg(arg)          => out.push(BC::Arg(arg.index)),
             Function::Arg(_)            => panic!(),
-            Function::FunctionRef(func) => out.extend(function.compile_as_value()),
-            Function::Local(_)          => panic!(),
+            Function::FunctionRef(_)    => out.extend(function.compile_as_value()),
+            // Function::Local(_)          => panic!(),
             Function::Unknown(_)        => panic!(),
         }
 
@@ -950,7 +944,7 @@ impl std::fmt::Display for Function {
             }
 
             Function::Literal(data) => write!(f, "{}", data.borrow().value),
-            Function::Local(data) => write!(f, "$[loc:{}]", data.borrow().index),
+            // Function::Local(data) => write!(f, "$[loc:{}]", data.borrow().index),
 
             Function::Match(data) => {
                 let data = data.borrow();
