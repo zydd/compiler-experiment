@@ -261,29 +261,29 @@ impl FunctionDefinition {
         self.locals.extend(ctx.locals.pop().unwrap());
     }
 
-    fn inline(self, argv: &Vec<FunctionRef>) -> Function {
-        assert_eq!(argv.len(), self.args.len());
+    // fn inline(self, argv: &Vec<FunctionRef>) -> Function {
+    //     assert_eq!(argv.len(), self.args.len());
 
-        for (arg, argv) in self.args.iter().zip(argv) {
-            match &*arg.borrow() {
-                Function::Arg(data) => {
-                    for arg_ref in &data.refs {
-                        let mut arg_use = arg_ref.borrow_mut();
-                        *arg_use = argv.borrow().clone();
+    //     for (arg, argv) in self.args.iter().zip(argv) {
+    //         match &*arg.borrow() {
+    //             Function::Arg(data) => {
+    //                 for arg_ref in &data.refs {
+    //                     let mut arg_use = arg_ref.borrow_mut();
+    //                     *arg_use = argv.borrow().clone();
 
-                        if let Function::ArgRef(parent_fn_arg) = &mut *arg_use {
-                            let mut parent_fn_arg = parent_fn_arg.borrow_mut();
-                            parent_fn_arg.arg_mut().unwrap().refs.push(arg_ref.clone());
-                        }
-                    }
-                }
+    //                     if let Function::ArgRef(parent_fn_arg) = &mut *arg_use {
+    //                         let mut parent_fn_arg = parent_fn_arg.borrow_mut();
+    //                         parent_fn_arg.arg_mut().unwrap().refs.push(arg_ref.clone());
+    //                     }
+    //                 }
+    //             }
 
-                _ => ()
-            }
-        }
+    //             _ => ()
+    //         }
+    //     }
 
-        return self.body.borrow().clone()
-    }
+    //     return self.body.borrow().clone()
+    // }
 
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
@@ -328,54 +328,54 @@ impl FunctionCall {
         }
     }
 
-    fn inline(&mut self, ctx: &mut Context) -> Option<Function> {
-        let function_ref = self.function.as_ref().unwrap();
-        let callee = match &*function_ref.borrow() {
-            Function::Definition(_)     => function_ref.clone(),
-            Function::FunctionRef(func) => func.clone(),
-            Function::Builtin(_)        => return None,
-            Function::ArgRef(_)         => return None,
-            _ => panic!("{}", self.name)
-        };
+    // fn inline(&mut self, ctx: &mut Context) -> Option<Function> {
+    //     let function_ref = self.function.as_ref().unwrap();
+    //     let callee = match &*function_ref.borrow() {
+    //         Function::Definition(_)     => function_ref.clone(),
+    //         Function::FunctionRef(func) => func.clone(),
+    //         Function::Builtin(_)        => return None,
+    //         Function::ArgRef(_)         => return None,
+    //         _ => panic!("{}", self.name)
+    //     };
 
-        let callee = callee.borrow();
+    //     let callee = callee.borrow();
 
-        if callee.definition().is_some() {
-            let callee = callee.definition().unwrap();
+    //     if callee.definition().is_some() {
+    //         let callee = callee.definition().unwrap();
 
-            for (argi, arg) in self.args.iter_mut().enumerate() {
-                if let Function::ArgRef(arg_ref) = &*arg.borrow() {
-                    let mut arg_ref = arg_ref.borrow_mut();
-                    let arg_ref = arg_ref.arg_mut().unwrap();
-                    arg_ref.refs.retain(|x| !FunctionRef::ptr_eq(x, arg));
-                }
-                // if !arg.borrow().is_value() {
-                //     let callee_arg = &callee.args[argi].borrow();
-                //     let callee_arg = callee_arg.arg().unwrap();
-                //     let use_count = callee_arg.refs.len();
+    //         for (argi, arg) in self.args.iter_mut().enumerate() {
+    //             if let Function::ArgRef(arg_ref) = &*arg.borrow() {
+    //                 let mut arg_ref = arg_ref.borrow_mut();
+    //                 let arg_ref = arg_ref.arg_mut().unwrap();
+    //                 arg_ref.refs.retain(|x| !FunctionRef::ptr_eq(x, arg));
+    //             }
+    //             // if !arg.borrow().is_value() {
+    //             //     let callee_arg = &callee.args[argi].borrow();
+    //             //     let callee_arg = callee_arg.arg().unwrap();
+    //             //     let use_count = callee_arg.refs.len();
 
-                //     // if an arg is not a value (e.g. function call), add it to a
-                //     // local variable instead of instantiating multiple times
-                //     if use_count > 1 {
-                //         ctx.locals.last_mut().unwrap().push(arg.clone());
-                //         *arg = Function::Local(FunctionArg {
-                //             name: callee_arg.name.clone(),
-                //             index: -(ctx.locals.last_mut().unwrap().len() as Argc),
-                //             refs: Vec::new(),
-                //         }).to_ref();
-                //     }
-                // }
-            }
+    //             //     // if an arg is not a value (e.g. function call), add it to a
+    //             //     // local variable instead of instantiating multiple times
+    //             //     if use_count > 1 {
+    //             //         ctx.locals.last_mut().unwrap().push(arg.clone());
+    //             //         *arg = Function::Local(FunctionArg {
+    //             //             name: callee_arg.name.clone(),
+    //             //             index: -(ctx.locals.last_mut().unwrap().len() as Argc),
+    //             //             refs: Vec::new(),
+    //             //         }).to_ref();
+    //             //     }
+    //             // }
+    //         }
 
-            let mut inlined = callee.clone().inline(&self.args);
-            Function::flag_tail_call(&mut inlined, self.tail_call);
-            return Some(inlined)
-        } else {
-            todo!();
-        }
+    //         let mut inlined = callee.clone().inline(&self.args);
+    //         Function::flag_tail_call(&mut inlined, self.tail_call);
+    //         return Some(inlined)
+    //     } else {
+    //         todo!();
+    //     }
 
-        return None
-    }
+    //     return None
+    // }
 
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
@@ -722,12 +722,12 @@ impl Function {
                         }
                     }
 
-                    if !call.recursive {
-                        if let Some(inlined) = call.inline(ctx) {
-                            *function_mut = inlined;
-                            continue;
-                        }
-                    }
+                    // if !call.recursive {
+                    //     if let Some(inlined) = call.inline(ctx) {
+                    //         *function_mut = inlined;
+                    //         continue;
+                    //     }
+                    // }
                 }
 
                 Function::Definition(fndef) => {
