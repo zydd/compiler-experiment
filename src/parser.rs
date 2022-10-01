@@ -71,7 +71,7 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
                     }
                     state = stack.pop().unwrap();
 
-                    let list = new.list.iter().map(|x| x.literal().expect("literal").value.clone()).collect();
+                    let list = new.list.iter().map(|x| x.literal().expect("literal").borrow().value.clone()).collect();
                     cur = Some(FunctionLiteral::new(Value::List(list)));
                 },
                 _ => return Err("unmatched parenthesis".to_string()),
@@ -94,10 +94,10 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
 
         match cur {
             None => (),
-            Some(mut cur) => {
+            Some(cur) => {
                 if state.defer_next {
                     state.defer_next = false;
-                    cur.call_mut().unwrap().deferred = true;
+                    cur.call().unwrap().borrow_mut().deferred = true;
                 }
                 state.list.push(cur);
             },

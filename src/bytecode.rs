@@ -325,6 +325,7 @@ impl Arch {
     }
 
     fn exec(&mut self) {
+        if ! self.prog.is_empty() {
         loop {
             let instr = self.prog[self.ip as usize].clone();
             // println!("ip: {} {:?} {:?}", self.ip, instr, self.stack);
@@ -353,6 +354,7 @@ impl Arch {
                 Return(argc)    => {self.stdreturn(argc); break},
                 ReturnCall(argc) => self.returncall(argc),
             }
+        }
         }
     }
 }

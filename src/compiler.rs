@@ -3,88 +3,95 @@ use std::collections::HashMap;
 use crate::bytecode::*;
 
 type Label = Addr;
-type FunctionRef = std::rc::Rc<std::cell::RefCell<Function>>;
 
-// #[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FunctionArg {
     name: String,
     index: Argc,
     // deferred: bool,
-    refs: Vec<FunctionRef>,
+    refs: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionBuiltin {
     name: String,
     arity: Argc,
     opcode: BuiltinFunction,
 }
 
-// #[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FunctionCall {
     name: String,
     argc: Argc,
-    function: Option<FunctionRef>,
-    args: Vec<FunctionRef>,
+    function: Option<Function>,
+    args: Vec<Function>,
     tail_call: Option<Argc>,
     recursive: bool,
     pub deferred: bool,
 }
 
-// #[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FunctionDefinition {
     name: String,
     arity: Argc,
     label: Label,
-    args: Vec<FunctionRef>,
-    body: FunctionRef,
+    args: Vec<RcRc<FunctionArg>>,
+    body: Function,
     // use_count: usize,
-    locals: Vec<FunctionRef>,
+    locals: Vec<Function>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionLiteral {
     data_label: Addr,
     pub value: Value,
 }
 
-// #[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FunctionMatch {
-    args: Vec<FunctionRef>,
-    cases: Vec<(Vec<FunctionRef>, FunctionRef)>,
+    args: Vec<RcRc<FunctionArg>>,
+    cases: Vec<(Vec<Function>, Function)>,
     tail_call: Option<Argc>,
 }
 
-// #[derive(Debug)]
+
+type RcRc<T> = std::rc::Rc<std::cell::RefCell<T>>;
+
+#[derive(Clone, Debug)]
 pub enum Function {
-    // TODO: test Arg(std::rc::Rc<std::cell::RefCell<FunctionArg>>),
-    Arg(FunctionArg),
-    ArgRef(FunctionRef),
-    Builtin(FunctionBuiltin),
-    Call(FunctionCall),
-    Definition(FunctionDefinition),
-    FunctionRef(FunctionRef),
-    Literal(FunctionLiteral),
-    Local(FunctionArg),
-    Match(FunctionMatch),
+    Arg(RcRc<FunctionArg>),
+    ArgRef(RcRc<FunctionArg>),
+    Builtin(RcRc<FunctionBuiltin>),
+    Call(RcRc<FunctionCall>),
+    Definition(RcRc<FunctionDefinition>),
+    FunctionRef(RcRc<FunctionDefinition>),
+    Literal(RcRc<FunctionLiteral>),
+    Local(RcRc<FunctionArg>),
+    Match(RcRc<FunctionMatch>),
     Unknown(String),
+}
+
+pub trait ToRcRc {
+    fn to_rcrc(self) -> RcRc<Self>;
+}
+
+impl<T> ToRcRc for T {
+    fn to_rcrc(self) -> RcRc<T> {
+        std::rc::Rc::new(std::cell::RefCell::new(self))
+    }
 }
 
 
 pub struct CompileStack {
-    func: FunctionRef,
-    scope: HashMap<String, FunctionRef>,
-    args: Vec<FunctionRef>,
-    locals: Vec<FunctionRef>,
+    func: Function,
+    scope: HashMap<String, Function>
 }
 
 impl CompileStack {
-    pub fn new(func: FunctionRef) -> CompileStack {
+    pub fn new(func: Function) -> CompileStack {
         CompileStack {
             func: func,
             scope: HashMap::new(),
-            args: Vec::new(),
-            locals: Vec::new(),
         }
     }
 }
@@ -94,7 +101,7 @@ pub struct Context {
     label_index: Label,
     data: Vec<Value>,
     stack: Vec<CompileStack>,
-    used_definitions: Vec<FunctionRef>,
+    used_definitions: Vec<RcRc<FunctionDefinition>>,
 }
 
 
@@ -103,19 +110,19 @@ impl Context {
         let mut new = Context {
             label_index: 1,
             data: Vec::new(),
-            stack: vec![CompileStack::new(Function::new("main".to_string()).to_ref())],
+            stack: vec![CompileStack::new(Function::new("main".to_string()))],
             used_definitions: Vec::new(),
         };
 
         macro_rules! builtin {
             ($instr: ident, $arity: expr, $func: literal) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, $func.to_string()).to_ref());
-                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()).to_ref());
+                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, $func.to_string()));
+                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
             };
             ($instr: ident, $arity: expr) => {
                 let long_name = concat!("__builtin_", stringify!($instr));
-                new.set(long_name.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()).to_ref());
+                new.set(long_name.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
             };
         }
 
@@ -149,7 +156,7 @@ impl Context {
         return label
     }
 
-    fn get(&self, key: &String) -> Option<FunctionRef> {
+    fn get(&self, key: &String) -> Option<Function> {
         for frame in self.stack.iter().rev() {
             if let Some(v) = frame.scope.get(key) {
                 return Some(v.clone())
@@ -161,12 +168,12 @@ impl Context {
         return None
     }
 
-    fn set(&mut self, name: String, function: FunctionRef) {
+    fn set(&mut self, name: String, function: Function) {
         let current = &mut self.stack.last_mut().unwrap().scope;
         current.insert(name, function.clone());
     }
 
-    fn enter(&mut self, func: FunctionRef) {
+    fn enter(&mut self, func: Function) {
         self.stack.push(CompileStack::new(func));
     }
 
@@ -177,13 +184,17 @@ impl Context {
 
 
 impl FunctionArg {
-    pub fn new(index: Argc, name: String) -> Function {
-        return Function::Arg(FunctionArg {
+    pub fn new(index: Argc, name: String) -> FunctionArg {
+        return FunctionArg {
             name: name,
             index: index,
             // deferred: false,
-            refs: Vec::new(),
-        })
+            refs: 0,
+        }
+    }
+
+    pub fn to_arg(self) -> Function {
+        Function::Arg(self.to_rcrc())
     }
 }
 
@@ -193,7 +204,7 @@ impl FunctionBuiltin {
             opcode: id,
             name: name,
             arity: arity,
-        })
+        }.to_rcrc())
     }
 }
 
@@ -203,77 +214,57 @@ impl FunctionDefinition {
         assert_eq!(expr.len() % 2, 1); // def + (args, body) pairs
         assert!(matches!(&expr[0], Function::Unknown(name) if name == "def"));
 
-        let call = expr[1].call().unwrap();
         let mut func = FunctionDefinition {
-            name: call.name.clone(),
-            arity: call.args.len() as Argc,
+            name: expr[1].call().unwrap().borrow().name.clone(),
+            arity: expr[1].call().unwrap().borrow().args.len() as Argc,
             label: 0,
             args: Vec::new(),
-            body: Function::new("undefined".to_string()).to_ref(),
+            body: Function::new("undefined".to_string()),
             // use_count: 0,
             locals: Vec::new(),
         };
 
-        assert!(expr.iter().skip(1).step_by(2).all(|x| x.call().unwrap().name == func.name));
+        assert!(expr.iter().skip(1).step_by(2).all(|x| x.call().unwrap().borrow().name == func.name));
         expr.remove(0);
 
         if expr.len() == 2 {
-            if expr[0].call().unwrap().args.iter()
-                    .all(|x| matches!(*x.borrow(), Function::Unknown(_))) {
-
+            if expr[0].call().unwrap().borrow().args.iter().all(|x| matches!(x, Function::Unknown(_))) {
                 let mut expr = expr.into_iter();
                 let call = expr.next().unwrap();
                 let body = expr.next().unwrap();
 
-                func.args = call.call().unwrap().args.clone();
-                func.body = body.to_ref();
+                func.args = call.call().unwrap().borrow().args.iter().enumerate().map(
+                            |(i, x)| FunctionArg::new(i as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
+                        ).collect();
+                func.body = body;
 
-                return Function::Definition(func)
+                return Function::Definition(func.to_rcrc())
             }
         }
 
-        func.args = (0..func.arity).map(|i| FunctionArg::new(i, std::format!("arg{}", i)).to_ref()).collect();
+        func.args = (0..func.arity).map(|i| FunctionArg::new(i, std::format!("arg{}", i)).to_rcrc()).collect();
 
-        let mut arg_refs = Vec::new();
-        for arg in &mut func.args {
-            let arg_ref = Function::ArgRef(arg.clone()).to_ref();
-            arg.borrow_mut().arg_mut().unwrap().refs.push(arg_ref.clone());
-            arg_refs.push(arg_ref);
-        }
-        func.body = FunctionMatch::new(arg_refs, expr).to_ref();
+        func.body = FunctionMatch::new(func.args.clone(), expr);
 
-        return Function::Definition(func)
+        return Function::Definition(func.to_rcrc())
     }
 
-    fn annotate(&mut self, ctx: &mut Context) {
-        self.label = ctx.new_label();
+    fn annotate(ctx: &mut Context, function: &mut Function) {
+        let mut def = function.definition().unwrap().borrow_mut();
 
-        for (i, arg_ref) in self.args.iter().enumerate() {
-            let mut arg = arg_ref.borrow_mut();
-            match &*arg {
-                Function::Unknown(name) => {
-                    let name = name.clone();
-                    *arg = FunctionArg::new(i as Argc, name.clone());
-                    ctx.set(name, arg_ref.clone());
-                }
+        def.label = ctx.new_label();
 
-                Function::Arg(arg) => {
-                    ctx.set(arg.name.clone(), arg_ref.clone());
-                }
-
-                _ => panic!("{}", arg)
-            }
+        for arg in def.args.iter() {
+            ctx.set(arg.borrow().name.clone(), Function::Arg(arg.clone()));
         }
 
-        Function::flag_tail_call(&mut self.body.borrow_mut(), Some(self.arity));
+        let arity = def.arity;
+        Function::flag_tail_call(&mut def.body, Some(arity));
 
-        Function::annotate(ctx, self.body.clone());
-
-
-        self.locals.extend(ctx.stack.last().unwrap().locals.clone());
+        Function::annotate(ctx, &mut def.body);  // WARNING: body borrowed here
     }
 
-    // fn inline(self, argv: &Vec<FunctionRef>) -> Function {
+    // fn inline(self, argv: &Vec<Function>) -> Function {
     //     assert_eq!(argv.len(), self.args.len());
 
     //     for (arg, argv) in self.args.iter().zip(argv) {
@@ -310,7 +301,7 @@ impl FunctionDefinition {
 
         out.extend(Function::compile(ctx, self.body.clone()));
 
-        if self.body.borrow().is_value() {
+        if self.body.is_value() {
             out.extend([
                 BC::Return(self.args.len() as Argc),
             ]);
@@ -330,11 +321,11 @@ impl FunctionCall {
                 name: name.clone(),
                 argc: (expr.len() - 1) as Argc,
                 function: None,
-                args: expr.into_iter().skip(1).map(|x| x.to_ref()).collect(),
+                args: expr.into_iter().skip(1).collect(),
                 tail_call: None,
                 recursive: false,
                 deferred: false,
-            })
+            }.to_rcrc())
         } else {
             panic!()
         }
@@ -344,7 +335,7 @@ impl FunctionCall {
     //     let function_ref = self.function.as_ref().unwrap();
     //     let callee = match &*function_ref.borrow() {
     //         Function::Definition(_)     => function_ref.clone(),
-    //         Function::FunctionRef(func) => func.clone(),
+    //         Function::Function(func)    => func.clone(),
     //         Function::Builtin(_)        => return None,
     //         Function::ArgRef(_)         => return None,
     //         _ => panic!("{}", self.name)
@@ -359,7 +350,7 @@ impl FunctionCall {
     //             if let Function::ArgRef(arg_ref) = &*arg.borrow() {
     //                 let mut arg_ref = arg_ref.borrow_mut();
     //                 let arg_ref = arg_ref.arg_mut().unwrap();
-    //                 arg_ref.refs.retain(|x| !FunctionRef::ptr_eq(x, arg));
+    //                 arg_ref.refs.retain(|x| !RcRc::ptr_eq(x, arg));
     //             }
     //             // if !arg.borrow().is_value() {
     //             //     let callee_arg = &callee.args[argi].borrow();
@@ -389,6 +380,42 @@ impl FunctionCall {
     //     return None
     // }
 
+    fn annotate(ctx: &mut Context, function: &mut Function) {
+        let mut call = function.call().unwrap().borrow_mut();
+
+        for mut arg in &mut call.args {
+            Function::annotate(ctx, &mut arg);
+        }
+
+        if call.function.is_none() {
+            let mut func_ref = ctx.get(&call.name).expect(&call.name);
+
+            // if func_ref.try_borrow().is_err() {
+            //     call.recursive = true;
+            // } else
+            if let Function::Arg(arg_data) = func_ref {
+                let arg_ref = Function::ArgRef(arg_data.clone());
+                arg_data.borrow_mut().refs += 1;
+
+                func_ref = arg_ref;
+            }
+
+            call.function = Some(func_ref);
+        } else {
+            let mut callee_ref = call.function.as_mut().unwrap();
+            if callee_ref.arg().is_some() {
+                Function::annotate(ctx, &mut callee_ref);
+            }
+        }
+
+        // if !call.recursive {
+        //     if let Some(inlined) = call.inline(ctx) {
+        //         *function_mut = inlined;
+        //         continue;
+        //     }
+        // }
+    }
+
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
 
@@ -399,19 +426,21 @@ impl FunctionCall {
         }
 
         if self.deferred {
-            if !ctx.used_definitions.iter().any(|x| FunctionRef::ptr_eq(x, func)) {
-                ctx.used_definitions.push(func.clone());
+            if let Function::Definition(fndef) = func {
+                if ! ctx.used_definitions.iter().any(|x| RcRc::ptr_eq(x, func.definition().unwrap())) {
+                    ctx.used_definitions.push(fndef.clone());
+                }
             }
 
-            out.extend(func.borrow().compile_as_value());
+            out.extend(func.compile_as_value());
             out.extend([
                 BC::Defer(self.args.len() as Argc + 1)
             ]);
         } else {
-            match &*func.borrow() {
+            match func {
                 Function::ArgRef(arg) => {
                     out.extend([
-                        BC::Arg(arg.borrow().arg().unwrap().index),
+                        BC::Arg(arg.borrow().index),
                     ]);
                     if let Some(move_args) = self.tail_call {
                         out.extend([
@@ -435,7 +464,7 @@ impl FunctionCall {
                         ]);
                     }
                     out.extend([
-                        BC::Builtin(func_data.opcode.clone()),
+                        BC::Builtin(func_data.borrow().opcode.clone()),
                     ]);
                     if self.tail_call.is_some() {
                         out.extend([
@@ -445,10 +474,10 @@ impl FunctionCall {
                 }
 
                 Function::Definition(func_data) => {
-                    if !ctx.used_definitions.iter().any(|x| FunctionRef::ptr_eq(x, func)) {
-                        ctx.used_definitions.push(func.clone());
+                    if !ctx.used_definitions.iter().any(|x| RcRc::ptr_eq(x, func_data)) {
+                        ctx.used_definitions.push(func_data.clone());
                     }
-                    let excess_args = self.args.len() > func_data.arity as usize;
+                    let excess_args = self.args.len() > func_data.borrow().arity as usize;
 
                     if !excess_args && self.tail_call.is_some() {
                         out.extend([
@@ -458,17 +487,17 @@ impl FunctionCall {
 
                     if !excess_args && self.tail_call.is_some() {
                         out.extend([
-                            BC::Jump(func_data.label),
+                            BC::Jump(func_data.borrow().label),
                         ]);
                     } else {  // excess_args || !tail_call
                         out.extend([
-                            BC::Call(func_data.label),
+                            BC::Call(func_data.borrow().label),
                         ]);
                     }
 
                     if excess_args {
                         out.extend([
-                            BC::ReturnCall(self.args.len() as Argc - func_data.arity),
+                            BC::ReturnCall(self.args.len() as Argc - func_data.borrow().arity),
                         ]);
 
                         if self.tail_call.is_some() {
@@ -479,9 +508,9 @@ impl FunctionCall {
                     }
                 }
 
-                Function::FunctionRef(func_ref) => {
-                    if !ctx.used_definitions.iter().any(|x| FunctionRef::ptr_eq(x, func_ref)) {
-                        ctx.used_definitions.push(func_ref.clone());
+                Function::FunctionRef(func_def) => {
+                    if !ctx.used_definitions.iter().any(|x| RcRc::ptr_eq(x, func_def)) {
+                        ctx.used_definitions.push(func_def.clone());
                     }
 
                     if let Some(move_args) = self.tail_call {
@@ -490,7 +519,7 @@ impl FunctionCall {
                         ]);
                     }
 
-                    out.extend(func_ref.borrow_mut().compile_as_value());
+                    out.extend(func.compile_as_value());
 
                     out.extend([
                         BC::Builtin(BuiltinFunction::Invoke),
@@ -516,17 +545,18 @@ impl FunctionLiteral {
         return Function::Literal(FunctionLiteral {
             data_label: 0,
             value: value,
-        })
+        }.to_rcrc())
     }
 
-    fn annotate(&mut self, ctx: &mut Context) {
-        self.data_label = ctx.data.len() as Label;
-        ctx.data.push(self.value.clone());
+    fn annotate(ctx: &mut Context, function: &mut Function) {
+        let mut lit = function.literal().unwrap().borrow_mut();
+        lit.data_label = ctx.data.len() as Label;
+        ctx.data.push(lit.value.clone());
     }
 }
 
 impl FunctionMatch {
-    pub fn new(args: Vec<FunctionRef>, defs: Vec<Function>) -> Function {
+    pub fn new(args: Vec<RcRc<FunctionArg>>, defs: Vec<Function>) -> Function {
         let mut func = FunctionMatch {
             args: args,
             cases: Vec::new(),
@@ -535,13 +565,43 @@ impl FunctionMatch {
 
         let mut defs = defs.into_iter();
         while let (Some(pat), Some(body)) = (defs.next(), defs.next()) {
-            let pattern = pat.call().unwrap().args.clone();
+            let pattern = pat.call().unwrap().borrow().args.clone();
             assert_eq!(func.args.len(), pattern.len());
 
-            func.cases.push((pattern, body.to_ref()));
+            func.cases.push((pattern, body));
         }
 
-        return Function::Match(func)
+        return Function::Match(func.to_rcrc())
+    }
+
+    fn annotate(ctx: &mut Context, function: &mut Function) {
+        let fnmatch = &mut *function.fnmatch().unwrap().borrow_mut();
+
+        for arg in &fnmatch.args {
+            arg.borrow_mut().refs += 1;
+            Function::annotate(ctx, &mut Function::Arg(arg.clone()));
+        }
+
+        for (pattern, body) in &mut fnmatch.cases {
+            ctx.enter(function.clone());
+
+            for (i, arg) in pattern.iter_mut().enumerate() {
+                match &arg {
+                    Function::Unknown(name) => if name != "_" {
+                        ctx.set(name.clone(), Function::Arg(fnmatch.args[i].clone()));
+                    }
+
+                    Function::Literal(_) => FunctionLiteral::annotate(ctx, arg),
+
+                    _ => todo!()
+                }
+            }
+
+            Function::flag_tail_call(body, fnmatch.tail_call);
+
+            Function::annotate(ctx, body);
+            ctx.exit();
+        }
     }
 
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
@@ -552,12 +612,12 @@ impl FunctionMatch {
             let case_end = ctx.new_label();
 
             for (pat, arg) in pattern.iter().zip(&self.args) {
-                match &*pat.borrow() {
+                match pat {
                     Function::Unknown(_) => (),
 
                     Function::Literal(_) => {
-                        out.extend(Function::compile(ctx, arg.clone()));
-                        out.extend(pat.borrow().compile_as_value());
+                        out.extend(Function::compile(ctx, Function::ArgRef(arg.clone())));
+                        out.extend(pat.compile_as_value());
                         out.extend([
                             BC::Bne(case_end),
                         ]);
@@ -569,7 +629,7 @@ impl FunctionMatch {
 
             out.extend(Function::compile(ctx, body.clone()));
 
-            if body.borrow().is_value() && self.tail_call.is_some() {
+            if body.is_value() && self.tail_call.is_some() {
                 let move_args = self.tail_call.unwrap();
                 out.extend([
                     BC::Return(move_args),
@@ -601,61 +661,61 @@ impl Function {
         return Function::Unknown(name)
     }
 
-    pub fn arg(&self) -> Option<&FunctionArg> {
+    pub fn arg(&self) -> Option<&RcRc<FunctionArg>> {
         match self {
-            Function::Arg(data) => Some(data),
+            Function::Arg(fnref) => Some(fnref),
             _ => None
         }
     }
 
-    pub fn arg_mut(&mut self) -> Option<&mut FunctionArg> {
+    pub fn into_arg(self) -> Option<RcRc<FunctionArg>> {
         match self {
-            Function::Arg(data) => Some(data),
+            Function::Arg(fnref) => Some(fnref),
             _ => None
         }
     }
 
-    pub fn call(&self) -> Option<&FunctionCall> {
+    pub fn call(&self) -> Option<&RcRc<FunctionCall>> {
         match self {
-            Function::Call(data) => Some(data),
+            Function::Call(fnref) => Some(fnref),
             _ => None
         }
     }
 
-    pub fn call_mut(&mut self) -> Option<&mut FunctionCall> {
+    pub fn literal(&self) -> Option<&RcRc<FunctionLiteral>> {
         match self {
-            Function::Call(data) => Some(data),
+            Function::Literal(fnref) => Some(fnref),
             _ => None
         }
     }
 
-    pub fn literal(&self) -> Option<&FunctionLiteral> {
+    pub fn definition(&self) -> Option<&RcRc<FunctionDefinition>> {
         match self {
-            Function::Literal(data) => Some(data),
+            Function::Definition(fnref) => Some(fnref),
             _ => None
         }
     }
 
-    pub fn definition(&self) -> Option<&FunctionDefinition> {
+    pub fn fnmatch(&self) -> Option<&RcRc<FunctionMatch>> {
         match self {
-            Function::Definition(data) => Some(data),
+            Function::Match(fnmatch) => Some(fnmatch),
             _ => None
         }
     }
 
-    // pub fn definition_mut(&mut self) -> Option<&mut FunctionDefinition> {
-    //     match self {
-    //         Function::Definition(data) => Some(data),
-    //         _ => None
-    //     }
-    // }
+    pub fn unknown_string(&self) -> Option<&String> {
+        match self {
+            Function::Unknown(name) => Some(name),
+            _ => None
+        }
+    }
 
     pub fn is_value(&self) -> bool {
         match self {
             Function::Arg(_)        => true,
             Function::ArgRef(_)     => true,
             Function::Builtin(_)    => true,
-            Function::FunctionRef(_)=> true,
+            Function::FunctionRef(_) => true,
             Function::Literal(_)    => true,
             Function::Local(_)      => true,
 
@@ -676,168 +736,86 @@ impl Function {
         }
     }
 
-    fn flag_tail_call(func: &mut Function, tail_call: Option<Argc>) {
+    fn flag_tail_call(func: &Function, tail_call: Option<Argc>) {
         match func {
-            Function::Call(call) => call.tail_call = tail_call,
-            Function::Match(margs) => margs.tail_call = tail_call,
+            Function::Call(call) => call.borrow_mut().tail_call = tail_call,
+            Function::Match(margs) => margs.borrow_mut().tail_call = tail_call,
             _ => ()
         }
     }
 
-    fn to_ref(self) -> FunctionRef {
-        std::rc::Rc::new(std::cell::RefCell::new(self))
-    }
+    fn annotate(ctx: &mut Context, function: &mut Function) {
+        match &function {
+            Function::Arg(_)        => (),
+            Function::ArgRef(_)     => (),
+            Function::Builtin(_)    => (),
+            Function::Local(_)      => (),
+            Function::FunctionRef(_) => (),
 
-    fn annotate(ctx: &mut Context, function: FunctionRef) {
-        loop {
-            let mut function_mut = &mut *function.borrow_mut();
-            match &mut function_mut {
-                Function::Arg(arg) => {
-                    assert!(arg.index >= 0);
-                    let arg_ref = ctx.stack.last().unwrap().args[arg.index as usize].clone();
-                    arg_ref.borrow_mut().arg_mut().unwrap().refs.push(function.clone());
-                    *function_mut = Function::ArgRef(arg_ref);
-                }
+            Function::Call(_)       => FunctionCall::annotate(ctx, function),
+            Function::Match(_)      => FunctionMatch::annotate(ctx, function),
+            Function::Literal(_)    => FunctionLiteral::annotate(ctx, function),
 
-                Function::ArgRef(_)     => (),
-                Function::Builtin(_)    => (),
-                Function::Local(_)      => (),
-                Function::FunctionRef(_) => (),
+            Function::Definition(fndef) => {
+                ctx.set(fndef.borrow().name.clone(), function.clone());
+                ctx.enter(function.clone());
 
-                Function::Call(call) => {
-                    for arg in &call.args {
-                        Function::annotate(ctx, arg.clone());
-                    }
+                FunctionDefinition::annotate(ctx, function);
 
-                    if call.function.is_none() {
-                        let mut func_ref = ctx.get(&call.name).expect(&call.name);
-
-                        if func_ref.try_borrow().is_err() {
-                            call.recursive = true;
-                        } else if func_ref.borrow().arg().is_some() {
-                            let arg_ref = Function::ArgRef(func_ref.clone()).to_ref();
-
-                            if let Function::Arg(arg_data) = &mut *func_ref.borrow_mut() {
-                                arg_data.refs.push(arg_ref.clone());
-                            }
-
-                            func_ref = arg_ref;
-                        }
-
-                        call.function = Some(func_ref.clone());
-                    } else {
-                        let callee_ref = call.function.as_ref().unwrap();
-                        if callee_ref.try_borrow_mut().is_ok() {
-                            if callee_ref.borrow_mut().arg().is_some() {
-                                Function::annotate(ctx, callee_ref.clone());
-                            }
-                        }
-                    }
-
-                    // if !call.recursive {
-                    //     if let Some(inlined) = call.inline(ctx) {
-                    //         *function_mut = inlined;
-                    //         continue;
-                    //     }
-                    // }
-                }
-
-                Function::Definition(fndef) => {
-                    ctx.set(fndef.name.clone(), function.clone());
-                    let mut stacktop = ctx.stack.last_mut().unwrap();
-                    stacktop.args = fndef.args.clone();
-                    ctx.enter(function.clone());
-
-                    fndef.annotate(ctx);
-
-                    ctx.exit();
-                }
-
-                Function::Match(fnmatch) => {
-                    for (pattern, body) in &fnmatch.cases {
-                        ctx.enter(function.clone());
-
-                        for arg in &mut fnmatch.args {
-                            Function::annotate(ctx, arg.clone());
-                        }
-
-                        for (i, arg) in pattern.iter().enumerate() {
-                            match &mut *arg.borrow_mut() {
-                                Function::Unknown(name) => if name != "_" {
-                                    ctx.set(name.clone(), fnmatch.args[i].clone());
-                                }
-
-                                Function::Literal(literal) => literal.annotate(ctx),
-
-                                _ => todo!()
-                            }
-                        }
-
-                        Function::flag_tail_call(&mut body.borrow_mut(), fnmatch.tail_call);
-
-                        Function::annotate(ctx, body.clone());
-                        ctx.exit();
-                    }
-                }
-
-                Function::Literal(literal)  => literal.annotate(ctx),
-
-                Function::Unknown(name) => {
-                    let func_ref = ctx.get(&name).unwrap();
-
-                    // if func_ref is already borrowed, assume it's a function definition
-                    // referencing itself
-                    if func_ref.try_borrow().is_err() {
-                        *function_mut = Function::FunctionRef(func_ref.clone());
-                        return
-                    }
-
-                    let mut func = &mut *func_ref.borrow_mut();
-                    match &mut func {
-                        Function::Arg(arg_data) => {
-                            *function_mut = Function::ArgRef(func_ref.clone());
-                            arg_data.refs.push(function.clone());
-                        },
-
-                        Function::ArgRef(arg_ref) => {
-                            *function_mut = Function::ArgRef(arg_ref.clone());
-                            arg_ref.borrow_mut().arg_mut().unwrap().refs.push(function.clone());
-                        },
-
-                        Function::Definition(_) => {
-                            *function_mut = Function::FunctionRef(func_ref.clone());
-                        }
-
-                        Function::Builtin(func) => {
-                            *function_mut = Function::Builtin(func.clone());
-                        }
-
-                        _ => panic!("Unkn: {} {}", name, func),
-                    }
-                }
-
-                other => todo!("{}", other)
+                ctx.exit();
             }
 
-            break;
+            Function::Unknown(name) => {
+                let func_ref = ctx.get(&name).unwrap();
+
+                // // if func_ref is already borrowed, assume it's a function definition
+                // // referencing itself
+                // if func_ref.try_borrow().is_err() {
+                //     *function_mut = Function::Function(func_ref.clone());
+                //     return
+                // }
+
+                match &func_ref {
+                    Function::Arg(arg_data) => {
+                        *function = Function::ArgRef(arg_data.clone());
+                        arg_data.borrow_mut().refs += 1;
+                    },
+
+                    // Function::ArgRef(arg_data) => {
+                    //     *function = Function::ArgRef(arg_data.clone());
+                    //     arg_data.borrow_mut().refs += 1;
+                    // },
+
+                    Function::Definition(func_def) => {
+                        *function = Function::FunctionRef(func_def.clone());
+                    }
+
+                    Function::Builtin(func) => {
+                        *function = Function::Builtin(func.clone());
+                    }
+
+                    _ => panic!("Unkn: {} {}", name, function),
+                }
+            }
+
+            other => todo!("{}", other)
         }
+
     }
 
-
-    fn compile(ctx: &mut Context, function: FunctionRef) -> Vec<BC> {
+    fn compile(ctx: &mut Context, function: Function) -> Vec<BC> {
         let mut out = Vec::new();
 
-        let function_ref = &*function.borrow();
-        match function_ref {
-            Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().arg().unwrap().index)),
-            Function::Call(call)        => out.extend(call.compile(ctx)),
-            Function::Builtin(_)        => out.extend(function_ref.compile_as_value()),
-            Function::Definition(fndef) => out.extend(fndef.compile(ctx)),
-            Function::Literal(_)        => out.extend(function_ref.compile_as_value()),
-            Function::Match(fnmatch)    => out.extend(fnmatch.compile(ctx)),
+        match &function {
+            Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().index)),
+            Function::Call(call)        => out.extend(call.borrow().compile(ctx)),
+            Function::Builtin(_)        => out.extend(function.compile_as_value()),
+            Function::Definition(fndef) => out.extend(fndef.borrow().compile(ctx)),
+            Function::Literal(_)        => out.extend(function.compile_as_value()),
+            Function::Match(fnmatch)    => out.extend(fnmatch.borrow().compile(ctx)),
             // Function::Arg(arg)          => out.push(BC::Arg(arg.index)),
             Function::Arg(_)            => panic!(),
-            Function::FunctionRef(func) => out.extend(func.borrow().compile_as_value()),
+            Function::FunctionRef(func) => out.extend(function.compile_as_value()),
             Function::Local(_)          => panic!(),
             Function::Unknown(_)        => panic!(),
         }
@@ -847,37 +825,37 @@ impl Function {
 
     fn compile_as_value(&self) -> Vec<BC> {
         match self {
-            Function::Arg(arg_data) => {
+            Function::Arg(arg_data) | Function::ArgRef(arg_data) => {
                 return vec![
-                    BC::Arg(arg_data.index),
+                    BC::Arg(arg_data.borrow().index),
                 ];
             }
 
             Function::Builtin(func_data) => {
                 return vec![
-                    BC::PushIns(func_data.opcode.clone()),
+                    BC::PushIns(func_data.borrow().opcode.clone()),
                 ];
             }
 
             Function::Definition(func_data) => {
                 return vec![
-                    BC::PushFn(func_data.label as Addr),
+                    BC::PushFn(func_data.borrow().label as Addr),
                 ];
             }
 
             Function::Literal(literal) => {
-                if let Value::Int(i) = literal.value {
+                if let Value::Int(i) = literal.borrow().value {
                     return vec![
                         BC::PushInt(i as i32),
                     ];
                 } else {
                     return vec![
-                        BC::Load(literal.data_label),
+                        BC::Load(literal.borrow().data_label),
                     ];
                 }
             }
 
-            _ => panic!()
+            other => panic!("{:?}", other)
         }
     }
 }
@@ -888,9 +866,9 @@ impl std::fmt::Display for Function {
         fn fmt_fn_name(f: &mut std::fmt::Formatter, func: &Function) -> std::fmt::Result {
             match func {
                 Function::Definition(func_data) =>
-                    write!(f, "{}[id:{}]", func_data.name, func_data.label)?,
+                    write!(f, "{}[id:{}]", func_data.borrow().name, func_data.borrow().label)?,
                 Function::Builtin(func_data) =>
-                    write!(f, "#{}[op:{}]", func_data.name, func_data.opcode.clone() as usize)?,
+                    write!(f, "#{}[op:{}]", func_data.borrow().name, func_data.borrow().opcode.clone() as usize)?,
                 other =>
                     write!(f, "{}", other)?,
             }
@@ -898,15 +876,16 @@ impl std::fmt::Display for Function {
         }
 
         match &self {
-            Function::Arg(data) => write!(f, "${}[use:{}]", data.name, data.refs.len()),
-            Function::ArgRef(data) => write!(f, "&{}", data.borrow().arg().unwrap().name),
+            Function::Arg(data) => write!(f, "${}[use:{}]", data.borrow().name, data.borrow().refs),
+            Function::ArgRef(data) => write!(f, "&{}", data.borrow().name),
             Function::Builtin(_) => fmt_fn_name(f, self),
 
             Function::Call(data) => {
+                let data = data.borrow();
                 write!(f, "(")?;
 
                 if data.function.is_some() {
-                    fmt_fn_name(f, &*data.function.as_ref().unwrap().borrow())?;
+                    fmt_fn_name(f, data.function.as_ref().unwrap())?;
                 } else {
                     write!(f, "{}[?]", data.name)?;
                 }
@@ -920,18 +899,19 @@ impl std::fmt::Display for Function {
                 }
 
                 for arg in &data.args {
-                    write!(f, " {}", arg.borrow())?;
+                    write!(f, " {}", arg)?;
                 }
                 write!(f, ")")
             }
 
             Function::Definition(data) => {
+                let data = data.borrow();
                 write!(f, "(def")?;
 
                 if !data.locals.is_empty() {
                     write!(f, " [local:")?;
                     for a in &data.locals {
-                        write!(f, " {}", a.borrow())?;
+                        write!(f, " {}", a)?;
                     }
                     write!(f, "]")?;
                 }
@@ -939,22 +919,23 @@ impl std::fmt::Display for Function {
                 write!(f, "\n  (")?;
                 fmt_fn_name(f, self)?;
                 for a in &data.args {
-                    write!(f, " {}", a.borrow())?;
+                    write!(f, " {}", Function::Arg(a.clone()))?;
                 }
-                write!(f, ") {}", data.body.borrow())?;
+                write!(f, ") {}", data.body)?;
 
                 write!(f, ")")
             }
 
             Function::FunctionRef(data) => {
                 write!(f, "#")?;
-                fmt_fn_name(f, &*data.borrow())
+                fmt_fn_name(f, &Function::Definition(data.clone()))
             }
 
-            Function::Literal(data) => write!(f, "{}", data.value),
-            Function::Local(data) => write!(f, "$[loc:{}]", data.index),
+            Function::Literal(data) => write!(f, "{}", data.borrow().value),
+            Function::Local(data) => write!(f, "$[loc:{}]", data.borrow().index),
 
             Function::Match(data) => {
+                let data = data.borrow();
                 write!(f, "\n match")?;
 
                 if data.tail_call.is_some() {
@@ -962,14 +943,14 @@ impl std::fmt::Display for Function {
                 }
 
                 for a in &data.args {
-                    write!(f, " {}", a.borrow())?;
+                    write!(f, " {}", Function::Arg(a.clone()))?;
                 }
                 for (pat, body) in &data.cases {
                     write!(f, "\n")?;
                     for p in pat {
-                        write!(f, "  {}", p.borrow())?;
+                        write!(f, "  {}", p)?;
                     }
-                    write!(f, " => {}", body.borrow())?;
+                    write!(f, " => {}", body)?;
                 }
                 write!(f, ")")
             }
@@ -1006,89 +987,89 @@ impl std::fmt::Display for Value {
 }
 
 
-impl Clone for FunctionArg {
-    fn clone(&self) -> Self {
-        return FunctionArg {
-            index: self.index.clone(),
-            name: self.name.clone(),
-            refs: Vec::new(),
-        }
-    }
-}
+// impl Clone for FunctionArg {
+//     fn clone(&self) -> Self {
+//         return FunctionArg {
+//             index: self.index.clone(),
+//             name: self.name.clone(),
+//             refs: Vec::new(),
+//         }
+//     }
+// }
 
-impl Clone for Function {
-    fn clone(&self) -> Self {
-        match self {
-            Function::ArgRef(data)      => Function::Arg(data.borrow().arg().unwrap().clone()),
-            Function::Arg(data)         => Function::Arg(data.clone()),
-            Function::Call(data)        => Function::Call(data.clone()),
-            Function::Builtin(data)     => Function::Builtin(data.clone()),
-            Function::Definition(data)  => Function::Definition(data.clone()),
-            Function::Literal(data)     => Function::Literal(data.clone()),
-            Function::Match(data)       => Function::Match(data.clone()),
-            Function::Unknown(data)     => Function::Unknown(data.clone()),
-            Function::Local(data)       => Function::Local(data.clone()),
-            Function::FunctionRef(data) => Function::FunctionRef(data.clone()),
-        }
-    }
-}
+// impl Clone for Function {
+//     fn clone(&self) -> Self {
+//         match self {
+//             Function::ArgRef(data)      => Function::Arg(data.clone()),
+//             Function::Arg(data)         => Function::Arg(data.clone()),
+//             Function::Call(data)        => Function::Call(data.clone()),
+//             Function::Builtin(data)     => Function::Builtin(data.clone()),
+//             Function::Definition(data)  => Function::Definition(data.clone()),
+//             Function::Literal(data)     => Function::Literal(data.clone()),
+//             Function::Match(data)       => Function::Match(data.clone()),
+//             Function::Unknown(data)     => Function::Unknown(data.clone()),
+//             Function::Local(data)       => Function::Local(data.clone()),
+//             Function::Function(data)    => Function::Function(data.clone()),
+//         }
+//     }
+// }
 
 
-impl Clone for FunctionCall {
-    fn clone(&self) -> Self {
-        let mut call = FunctionCall {
-            name: self.name.clone(),
-            argc: self.argc.clone(),
-            function: self.function.clone(),
-            args: self.args.iter().map(|x| x.borrow().clone().to_ref()).collect(),
-            tail_call: self.tail_call.clone(),
-            recursive: self.recursive.clone(),
-            deferred: self.deferred.clone(),
-        };
+// impl Clone for FunctionCall {
+//     fn clone(&self) -> Self {
+//         let mut call = FunctionCall {
+//             name: self.name.clone(),
+//             argc: self.argc.clone(),
+//             function: self.function.clone(),
+//             args: self.args.iter().map(|x| x.borrow().clone().to_ref()).collect(),
+//             tail_call: self.tail_call.clone(),
+//             recursive: self.recursive.clone(),
+//             deferred: self.deferred.clone(),
+//         };
 
-        if let Some(func) = &mut call.function {
-            // assume it's a recursive call if already borrowed
-            if func.try_borrow().is_ok() && matches!(&*func.borrow(), Function::ArgRef(_)) {
-                let mut func_ref = func.borrow_mut();
-                // if the callee is an ArgRef, convert it to Arg so it can be relinked by annotate
-                *func_ref = func_ref.clone();
-            }
-        }
+//         if let Some(func) = &mut call.function {
+//             // assume it's a recursive call if already borrowed
+//             if func.try_borrow().is_ok() && matches!(&*func.borrow(), Function::ArgRef(_)) {
+//                 let mut func_ref = func.borrow_mut();
+//                 // if the callee is an ArgRef, convert it to Arg so it can be relinked by annotate
+//                 *func_ref = func_ref.clone();
+//             }
+//         }
 
-        return call
-    }
-}
+//         return call
+//     }
+// }
 
-impl Clone for FunctionDefinition {
-    fn clone(&self) -> Self {
-        let mut func = FunctionDefinition {
-            name: self.name.clone(),
-            arity: self.arity.clone(),
-            label: 0,
-            args: self.args.iter().map(|x| x.borrow().clone().to_ref()).collect(),
-            body: self.body.borrow().clone().to_ref(),
-            // use_count: 0,
-            locals: self.locals.iter().map(|x| x.borrow().clone().to_ref()).collect(),
-        };
+// impl Clone for FunctionDefinition {
+//     fn clone(&self) -> Self {
+//         let mut func = FunctionDefinition {
+//             name: self.name.clone(),
+//             arity: self.arity.clone(),
+//             label: 0,
+//             args: self.args.iter().map(|x| x.borrow().clone().to_ref()).collect(),
+//             body: self.body.borrow().clone().to_ref(),
+//             // use_count: 0,
+//             locals: self.locals.iter().map(|x| x.borrow().clone().to_ref()).collect(),
+//         };
 
-        func.annotate(&mut Context::new());
+//         func.annotate(&mut Context::new());
 
-        return func
-    }
-}
+//         return func
+//     }
+// }
 
-impl Clone for FunctionMatch {
-    fn clone(&self) -> Self {
-        return FunctionMatch {
-            args: self.args.iter().map(|x| x.borrow().clone().to_ref()).collect(),
-            cases: self.cases.iter().map(|(pat, body)| (
-                pat.iter().map(|x| x.borrow().clone().to_ref()).collect(),
-                body.borrow().clone().to_ref())
-            ).collect(),
-            tail_call: self.tail_call.clone(),
-        };
-    }
-}
+// impl Clone for FunctionMatch {
+//     fn clone(&self) -> Self {
+//         return FunctionMatch {
+//             args: self.args.iter().map(|x| x.borrow().clone().to_ref()).collect(),
+//             cases: self.cases.iter().map(|(pat, body)| (
+//                 pat.iter().map(|x| x.borrow().clone().to_ref()).collect(),
+//                 body.borrow().clone().to_ref())
+//             ).collect(),
+//             tail_call: self.tail_call.clone(),
+//         };
+//     }
+// }
 
 
 fn link(program: &mut Vec<BC>) {
@@ -1115,23 +1096,19 @@ fn link(program: &mut Vec<BC>) {
 }
 
 
-pub fn compile(ast: Vec<Function>) -> (Vec<BC>, Vec<Value>) {
-    let mut ast = ast.into_iter().map(|x| x.to_ref()).collect::<Vec<_>>();
+pub fn compile(ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Value>) {
+    // let mut ast = ast.into_iter().map(|x| x.to_ref()).collect::<Vec<_>>();
 
     let mut ctx = Context::new();
 
-    for el in ast.iter_mut() {
-        Function::annotate(&mut ctx, el.clone());
-        println!("{}\n", el.borrow());
-    }
-
-    for el in ast.iter_mut() {
-        println!("{}\n", el.borrow());
+    for mut el in ast.iter_mut() {
+        Function::annotate(&mut ctx, &mut el);
+        println!("{}\n", el);
     }
 
     let mut out: Vec<BC> = Vec::new();
     for el in ast.iter_mut() {
-        if el.borrow().definition().is_none() {
+        if el.definition().is_none() {
             out.extend(Function::compile(&mut ctx, el.clone()));
         }
     }
@@ -1143,11 +1120,11 @@ pub fn compile(ast: Vec<Function>) -> (Vec<BC>, Vec<Value>) {
     let mut def = 0;
     while def < ctx.used_definitions.len() {
         let func = ctx.used_definitions[def].clone();
-        out.extend(Function::compile(&mut ctx, func));
+        out.extend(Function::compile(&mut ctx, Function::Definition(func)));
         def += 1;
     }
 
-    println!("\n{:?}\n", out);
+    // println!("\n{:?}\n", out);
 
     link(&mut out);
 

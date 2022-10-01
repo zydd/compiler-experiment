@@ -13,12 +13,12 @@ fn main() {
     let mut code = String::new();
     file.read_to_string(&mut code).expect("read");
 
-    let ast = parser::parse(code).expect("parse error");
+    let mut ast = parser::parse(code).expect("parse error");
 
     // for topnode in &ast {
     //     println!("{}", topnode);
     // }
-    let comp = compiler::compile(ast);
+    let comp = compiler::compile(&mut ast);
     println!("\n{:?}\n", comp.1);
 
     let orig_hook = std::panic::take_hook();
