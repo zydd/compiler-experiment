@@ -71,12 +71,29 @@ pub enum Function {
 }
 
 
+pub struct CompileStack {
+    func: FunctionRef,
+    scope: HashMap<String, FunctionRef>,
+    args: Vec<FunctionRef>,
+    locals: Vec<FunctionRef>,
+}
+
+impl CompileStack {
+    pub fn new(func: FunctionRef) -> CompileStack {
+        CompileStack {
+            func: func,
+            scope: HashMap::new(),
+            args: Vec::new(),
+            locals: Vec::new(),
+        }
+    }
+}
+
+
 pub struct Context {
     label_index: Label,
     data: Vec<Value>,
-    scope: Vec<HashMap<String, FunctionRef>>,
-    args: Vec<Vec<FunctionRef>>,
-    locals: Vec<Vec<FunctionRef>>,
+    stack: Vec<CompileStack>,
     used_definitions: Vec<FunctionRef>,
 }
 
@@ -86,9 +103,7 @@ impl Context {
         let mut new = Context {
             label_index: 1,
             data: Vec::new(),
-            scope: vec![HashMap::new()],
-            args: vec![Vec::new()],
-            locals: vec![Vec::new()],
+            stack: vec![CompileStack::new(Function::new("main".to_string()).to_ref())],
             used_definitions: Vec::new(),
         };
 
@@ -135,8 +150,8 @@ impl Context {
     }
 
     fn get(&self, key: &String) -> Option<FunctionRef> {
-        for scope in self.scope.iter().rev() {
-            if let Some(v) = scope.get(key) {
+        for frame in self.stack.iter().rev() {
+            if let Some(v) = frame.scope.get(key) {
                 return Some(v.clone())
             }
         }
@@ -147,16 +162,16 @@ impl Context {
     }
 
     fn set(&mut self, name: String, function: FunctionRef) {
-        let current = self.scope.last_mut().unwrap();
+        let current = &mut self.stack.last_mut().unwrap().scope;
         current.insert(name, function.clone());
     }
 
-    fn enter(&mut self) {
-        self.scope.push(HashMap::new());
+    fn enter(&mut self, func: FunctionRef) {
+        self.stack.push(CompileStack::new(func));
     }
 
     fn exit(&mut self) {
-        self.scope.pop();
+        self.stack.pop();
     }
 }
 
@@ -232,9 +247,6 @@ impl FunctionDefinition {
 
     fn annotate(&mut self, ctx: &mut Context) {
         self.label = ctx.new_label();
-        ctx.args.push(self.args.clone());
-        ctx.locals.push(Vec::new());
-        ctx.enter();
 
         for (i, arg_ref) in self.args.iter().enumerate() {
             let mut arg = arg_ref.borrow_mut();
@@ -257,8 +269,8 @@ impl FunctionDefinition {
 
         Function::annotate(ctx, self.body.clone());
 
-        ctx.exit();
-        self.locals.extend(ctx.locals.pop().unwrap());
+
+        self.locals.extend(ctx.stack.last().unwrap().locals.clone());
     }
 
     // fn inline(self, argv: &Vec<FunctionRef>) -> Function {
@@ -682,7 +694,7 @@ impl Function {
             match &mut function_mut {
                 Function::Arg(arg) => {
                     assert!(arg.index >= 0);
-                    let arg_ref = ctx.args.last().unwrap()[arg.index as usize].clone();
+                    let arg_ref = ctx.stack.last().unwrap().args[arg.index as usize].clone();
                     arg_ref.borrow_mut().arg_mut().unwrap().refs.push(function.clone());
                     *function_mut = Function::ArgRef(arg_ref);
                 }
@@ -732,12 +744,18 @@ impl Function {
 
                 Function::Definition(fndef) => {
                     ctx.set(fndef.name.clone(), function.clone());
+                    let mut stacktop = ctx.stack.last_mut().unwrap();
+                    stacktop.args = fndef.args.clone();
+                    ctx.enter(function.clone());
+
                     fndef.annotate(ctx);
+
+                    ctx.exit();
                 }
 
                 Function::Match(fnmatch) => {
                     for (pattern, body) in &fnmatch.cases {
-                        ctx.enter();
+                        ctx.enter(function.clone());
 
                         for arg in &mut fnmatch.args {
                             Function::annotate(ctx, arg.clone());
