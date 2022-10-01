@@ -76,6 +76,7 @@ pub enum BuiltinFunction {
 
     Car,
     Cdr,
+    Cons,
 }
 
 
@@ -260,6 +261,13 @@ impl Arch {
         self.stack.push(Value::List(tail));
     }
 
+    fn cons(&mut self) {
+        let value = self.pop_undefer();
+        let mut list = self.pop_undefer().as_list_mut();
+        list.push_front(value);
+        self.stack.push(Value::List(list));
+    }
+
     fn invoke(&mut self) {
         match self.pop_undefer() {
             Value::Function(addr) => self.call(addr),
@@ -321,6 +329,7 @@ impl Arch {
             Neq     => self.neq(),
             Car     => self.car(),
             Cdr     => self.cdr(),
+            Cons    => self.cons(),
         }
     }
 
@@ -328,7 +337,7 @@ impl Arch {
         if ! self.prog.is_empty() {
         loop {
             let instr = self.prog[self.ip as usize].clone();
-            // println!("ip: {} {:?} {:?}", self.ip, instr, self.stack);
+            // println!("ip: {:3} {:?}\t{:?}", self.ip, instr, self.stack.iter().rev().take(3).collect::<Vec<_>>());
             self.ip += 1;
 
             use BC::*;

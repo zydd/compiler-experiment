@@ -146,6 +146,7 @@ impl Context {
 
         builtin!(Car,   1,  "car");
         builtin!(Cdr,   1,  "cdr");
+        builtin!(Cons,  2,  "cons");
 
         return new
     }
