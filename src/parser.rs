@@ -104,5 +104,9 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
         }
     }
 
+    if stack.len() != 0 {
+        return Err("mismatched parenthesis".to_string())
+    }
+
     return Ok(state.list)
 }
