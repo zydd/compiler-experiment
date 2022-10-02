@@ -1,4 +1,4 @@
-(def (assert True) (__builtin_Nop))
+(def (assert True) ())
 (def (assert_eq a b) (assert (== a b)))
 
 (assert_eq [3] (cons 3 []))

@@ -18,6 +18,8 @@ struct Arch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    None,
+    Addr(Addr),
     Bool(bool),
     Int(IntType),
     Float(FloatType),

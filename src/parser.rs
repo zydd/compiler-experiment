@@ -58,7 +58,9 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
                     }
                     state = stack.pop().unwrap();
 
-                    if matches!(&new.list[0], Function::Unknown(name) if name == "def") {
+                    if new.list.is_empty() {
+                        cur = Some(FunctionLiteral::new(Value::None));
+                    } else if matches!(&new.list[0], Function::Unknown(name) if name == "def") {
                         cur = Some(FunctionDefinition::new(new.list))
                     } else {
                         cur = Some(FunctionCall::new(new.list))
