@@ -1,3 +1,7 @@
+pub(crate) mod runtime;
+
+use self::runtime::*;
+
 // type SString = smartstring::SmartString::<smartstring::Compact>;
 pub type Addr = u32;
 pub type Argc = i16;
@@ -10,6 +14,7 @@ type FloatType = f64;
 struct Arch {
     ip: Addr,
     fp: Addr,
+    runtime: Runtime,
     prog: Vec<BC>,
     data: Vec<Value>,
     stack: Vec<Value>,
@@ -35,21 +40,22 @@ pub enum Value {
 #[derive(Clone, Debug, PartialEq)]
 pub enum BC {
     Builtin(BuiltinFunction),
+    Syscall(Addr),
     AddA(Argc, Argc),
     Arg(Argc),
     Bne(Addr),
+    Call(Addr),
     CarA(Argc),
     CdrA(Argc),
-    Call(Addr),
-    Debug(Argc),
     Defer(Argc),
+    Jump(Addr),
     Label(Addr),
     Load(Addr),
     LtA(Argc, Argc),
     MoveArgs(Argc),
-    Jump(Addr),
     Pop(Argc),
     PushFn(Addr),
+    PushAddr(Addr),
     PushIns(BuiltinFunction),
     PushInt(i32),
     Return(Argc),
@@ -98,11 +104,15 @@ macro_rules! enum_as {
 impl Value {
     enum_as!(isize, int, Value::Int);
     enum_as!(ListType, list, Value::List);
+
     pub fn as_list_mut(self) -> ListType {
-        if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
+        if let Value::List(a) = self { a } else { panic!("expected list: {:?}", self) }
     }
     pub fn as_deferred(self) -> Vec<Value> {
-        if let Value::Deferred(a) = self { a } else { panic!("not a deferred value: {:?}", self) }
+        if let Value::Deferred(a) = self { a } else { panic!("expected deferred: {:?}", self) }
+    }
+    pub fn as_int(self) -> IntType {
+        if let Value::Int(a) = self { a } else { panic!("expected Int: {:?}", self) }
     }
 }
 
@@ -168,6 +178,7 @@ impl Arch {
         let new = Arch{
             ip: 0,
             fp: 0,
+            runtime: Runtime::new(),
             prog: prog,
             data: data,
             stack: Vec::with_capacity(100),
@@ -220,11 +231,6 @@ impl Arch {
         self.stack.truncate(self.stack.len() - n as usize);
     }
 
-    fn debug(&mut self, n: Argc) {
-        let i = std::cmp::max(0, self.stack.len() as isize - n as isize) as usize;
-        println!("Debug: ip: {} fp: {} stack: [{}..] {:?}", self.ip, self.fp, i, &self.stack[i..])
-    }
-
     fn add_a(&mut self, a: Argc, b: Argc) {
         let a = self.arg(a).int().unwrap();
         let b = self.arg(b).int().unwrap();
@@ -274,6 +280,7 @@ impl Arch {
         match self.pop_undefer() {
             Value::Function(addr) => self.call(addr),
             Value::Builtin(func) => self.builtin(func),
+            Value::Addr(func) => self.syscall(func as usize),
 
             other => panic!("not invokable: {:?}", other),
         }
@@ -345,13 +352,13 @@ impl Arch {
             use BC::*;
             match instr {
                 Builtin(func)   => self.builtin(func),
+                Syscall(addr)   => self.syscall(addr as usize),
                 AddA(a, b)      => self.add_a(a, b),
                 Arg(a)          => self.stack.push(self.arg(a).clone()),
                 Bne(addr)       => self.bne(addr),
                 Call(addr)      => self.call(addr),
                 CarA(a)         => self.car_a(a),
                 CdrA(a)         => self.cdr_a(a),
-                Debug(n)        => self.debug(n),
                 Defer(n)        => self.defer(n),
                 Jump(addr)      => self.ip = addr,
                 Label(_)        => (),
@@ -361,6 +368,7 @@ impl Arch {
                 Pop(n)          => self.pop(n),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),
                 PushIns(func)   => self.stack.push(Value::Builtin(func)),
+                PushAddr(func)  => self.stack.push(Value::Addr(func)),
                 PushInt(i)      => self.stack.push(Value::Int(i as IntType)),
                 Return(argc)    => {self.stdreturn(argc); break},
                 ReturnCall(argc) => self.returncall(argc),
