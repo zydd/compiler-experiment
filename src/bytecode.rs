@@ -98,11 +98,17 @@ macro_rules! enum_as {
 impl Value {
     enum_as!(isize, int, Value::Int);
     enum_as!(ListType, list, Value::List);
+
     pub fn as_list_mut(self) -> ListType {
-        if let Value::List(a) = self { a } else { panic!("not a list: {:?}", self) }
+        if let Value::List(a) = self { a } else { panic!("expected list: {:?}", self) }
     }
+
     pub fn as_deferred(self) -> Vec<Value> {
-        if let Value::Deferred(a) = self { a } else { panic!("not a deferred value: {:?}", self) }
+        if let Value::Deferred(a) = self { a } else { panic!("expected deferred: {:?}", self) }
+    }
+
+    pub fn as_addr(self) -> Addr {
+        if let Value::Addr(a) = self { a } else { panic!("expected address: {:?}", self) }
     }
 }
 
@@ -179,8 +185,10 @@ impl Arch {
     fn stdreturn(&mut self, argc: Argc) {
         if argc > 0 {
             let ret = self.stack.pop().unwrap();
+            self.fp = self.stack.pop().unwrap().as_addr();
+            self.ip = self.stack.pop().unwrap().as_addr();
 
-            self.stack.truncate(self.fp as usize - argc as usize);
+            self.stack.truncate(self.stack.len() - argc as usize);
             self.stack.push(ret);
         }
     }
@@ -193,18 +201,13 @@ impl Arch {
     }
 
     fn call(&mut self, addr: Addr) {
-        let frame = self.stack.len();
+        let frame = self.stack.len() as Addr;
 
-        let ip = self.ip;
-        let fp = self.fp;
+        self.stack.push(Value::Addr(self.ip));
+        self.stack.push(Value::Addr(self.fp));
 
         self.ip = addr;
-        self.fp = frame as Addr;
-
-        self.exec();
-
-        self.ip = ip;
-        self.fp = fp;
+        self.fp = frame;
     }
 
     fn arg(&self, i: Argc) -> &Value {
@@ -212,8 +215,9 @@ impl Arch {
     }
 
     fn move_args(&mut self, argc: Argc) {
-        self.stack.drain((self.fp as usize - argc as usize)..self.fp as usize);
-        self.fp = self.stack.len() as Addr;
+        let args = self.stack.drain(self.fp as usize + 2..).collect::<Vec<Value>>();
+        self.stack.splice(self.fp as usize - argc as usize..self.fp as usize, args);
+        self.fp = self.stack.len() as Addr - 2;
     }
 
     fn pop(&mut self, n: Argc) {
@@ -339,7 +343,7 @@ impl Arch {
         if ! self.prog.is_empty() {
         loop {
             let instr = self.prog[self.ip as usize].clone();
-            // println!("ip: {:3} {:?}\t{:?}", self.ip, instr, self.stack.iter().rev().take(3).collect::<Vec<_>>());
+            println!("ip: {:3} {:?}\t{:?}", self.ip, instr, self.stack.iter().rev().take(30).collect::<Vec<_>>());
             self.ip += 1;
 
             use BC::*;

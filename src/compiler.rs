@@ -462,17 +462,12 @@ impl FunctionCall {
                 }
 
                 Function::Builtin(func_data) => {
-                    if let Some(move_args) = self.tail_call {
-                        out.extend([
-                            BC::MoveArgs(move_args),
-                        ]);
-                    }
                     out.extend([
                         BC::Builtin(func_data.borrow().opcode.clone()),
                     ]);
-                    if self.tail_call.is_some() {
+                    if let Some(move_args) = self.tail_call {
                         out.extend([
-                            BC::Return(0),
+                            BC::Return(move_args),
                         ]);
                     }
                 }
