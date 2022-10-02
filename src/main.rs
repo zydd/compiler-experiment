@@ -15,10 +15,8 @@ fn main() {
 
     let mut ast = parser::parse(code).expect("parse error");
 
-    // for topnode in &ast {
-    //     println!("{}", topnode);
-    // }
-    let comp = compiler::compile(&mut ast);
+    let runtime = bytecode::runtime::Runtime::new();
+    let comp = compiler::compile(&runtime, &mut ast);
     println!("\n{:?}\n", comp.1);
 
     let orig_hook = std::panic::take_hook();
@@ -31,7 +29,7 @@ fn main() {
     let thread = std::thread::Builder::new()
         .name("interpreter".to_string())
         .stack_size(STACK_SIZE)
-        .spawn(|| bytecode::execute(comp.0, comp.1))
+        .spawn(|| bytecode::execute(runtime, comp.0, comp.1))
         .unwrap();
 
     thread.join().unwrap_or(());

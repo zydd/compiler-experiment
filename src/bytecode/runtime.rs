@@ -2,46 +2,75 @@ use super::*;
 
 use std::collections::HashMap;
 
-use crate::bytecode::*;
-
-type Syscall = fn(arch: &mut Arch);
+type Builtin = fn(arch: &mut Arch);
 
 #[derive(Debug)]
-pub(crate) struct SyscallInfo {
+pub(crate) struct BuiltinInfo {
     pub index: usize,
     pub arity: usize,
 }
 
-pub(crate) struct Runtime {
-    syscall: Vec<Syscall>,
-    pub callinfo: HashMap<String, SyscallInfo>,
+pub struct Runtime {
+    builtin: Vec<Builtin>,
+    pub(crate) functioninfo: HashMap<String, BuiltinInfo>,
 }
 
 impl Runtime {
     pub fn new() -> Runtime {
         let mut runtime = Runtime {
-            syscall: Vec::new(),
-            callinfo: HashMap::new(),
+            builtin: Vec::new(),
+            functioninfo: HashMap::new(),
         };
 
-        macro_rules! register_call {
+        macro_rules! builtin {
             ($func_name:ident, $arity:expr) => {
-                runtime.callinfo.insert(
-                    stringify!($func_name).to_string(),
-                    SyscallInfo {
-                        index: runtime.syscall.len(),
-                        arity: $arity,
-                    }
-                );
-                runtime.syscall.push(Arch::$func_name);
+                runtime.register(stringify!($func_name), Arch::$func_name, $arity);
+            };
+
+            ($func_name:ident, $arity:expr, $operator:literal) => {
+                runtime.register(concat!("__builtin_", stringify!($func_name)), Arch::$func_name, $arity);
+                runtime.register($operator, Arch::$func_name, $arity);
             };
         }
 
-        register_call!(debug,   1);
-        register_call!(print,   1);
-        register_call!(println, 1);
+        runtime.register("__builtin_nop", |_arch| { }, 0);
+        runtime.register("__builtin_pop", |arch| arch.pop(1), 0);
+        runtime.register("__builtin_except", Arch::except, 0);
+        runtime.register("__builtin_invoke", Arch::invoke, 0);
+        runtime.register("__builtin_undefer", Arch::undefer, 0);
+
+        builtin!(car,       1);
+        builtin!(cdr,       1);
+        builtin!(cons,      2);
+
+        builtin!(debug,     1);
+        builtin!(print,     1);
+        builtin!(println,   1);
+
+        builtin!(add,   2,  "+");
+        builtin!(div,   2,  "/");
+        builtin!(mul,   2,  "*");
+        builtin!(sub,   2,  "-");
+
+        builtin!(eq,    2,  "==");
+        builtin!(geq,   2,  ">=");
+        builtin!(gt,    2,  ">" );
+        builtin!(leq,   2,  "<=");
+        builtin!(lt,    2,  "<" );
+        builtin!(neq,   2,  "!=");
 
         return runtime
+    }
+
+    fn register(&mut self, name: &str, func: Builtin, arity: usize) {
+        self.functioninfo.insert(
+            name.to_string(),
+            BuiltinInfo {
+                index: self.builtin.len(),
+                arity: arity,
+            }
+        );
+        self.builtin.push(func);
     }
 }
 
@@ -54,8 +83,8 @@ impl std::fmt::Debug for Runtime {
 }
 
 impl Arch {
-    pub(super) fn syscall(&mut self, index: usize) {
-        self.runtime.syscall[index](self);
+    pub(super) fn builtin(&mut self, index: usize) {
+        self.runtime.builtin[index](self);
     }
 
     fn debug(&mut self) {
@@ -70,5 +99,9 @@ impl Arch {
 
     fn println(self: &mut Arch) {
         println!("{}", self.pop_undefer());
+    }
+
+    fn except(self: &mut Arch) {
+        panic!("Builtin(Except) at {}", self.ip-1);
     }
 }

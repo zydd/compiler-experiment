@@ -24,7 +24,6 @@ struct Arch {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     None,
-    Addr(Addr),
     Bool(bool),
     Int(IntType),
     Float(FloatType),
@@ -32,15 +31,14 @@ pub enum Value {
     List(ListType),
     Deferred(Vec<Value>),
     Function(Addr),
-    Builtin(BuiltinFunction),
+    Builtin(Addr),
 }
 
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum BC {
-    Builtin(BuiltinFunction),
-    Syscall(Addr),
+    Builtin(Addr),
     AddA(Argc, Argc),
     Arg(Argc),
     Bne(Addr),
@@ -55,36 +53,10 @@ pub enum BC {
     MoveArgs(Argc),
     Pop(Argc),
     PushFn(Addr),
-    PushAddr(Addr),
-    PushIns(BuiltinFunction),
+    PushIns(Addr),
     PushInt(i32),
     Return(Argc),
     ReturnCall(Argc),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum BuiltinFunction {
-    Nop,
-    Except,
-    Invoke,
-    Pop,
-    Undefer,
-
-    Add,
-    Div,
-    Mul,
-    Sub,
-
-    Eq,
-    Geq,
-    Gt,
-    Leq,
-    Lt,
-    Neq,
-
-    Car,
-    Cdr,
-    Cons,
 }
 
 
@@ -151,7 +123,7 @@ impl std::cmp::PartialOrd for Value {
     }
 }
 
-macro_rules! builtin {
+macro_rules! operation {
     ($func_name:ident, $function:expr) => {
         fn $func_name(&mut self) {
             let a = self.pop_undefer();
@@ -163,22 +135,22 @@ macro_rules! builtin {
 }
 
 impl Arch {
-    builtin!(add, |a, b| a + b);
-    builtin!(div, |a, b| a / b);
-    builtin!(mul, |a, b| a * b);
-    builtin!(sub, |a, b| a - b);
-    builtin!(lt,  |a, b| a <  b);
-    builtin!(leq, |a, b| a <= b);
-    builtin!(gt,  |a, b| a >  b);
-    builtin!(geq, |a, b| a >= b);
-    builtin!(eq,  |a, b| a == b);
-    builtin!(neq, |a, b| a != b);
+    operation!(add, |a, b| a + b);
+    operation!(div, |a, b| a / b);
+    operation!(mul, |a, b| a * b);
+    operation!(sub, |a, b| a - b);
+    operation!(lt,  |a, b| a <  b);
+    operation!(leq, |a, b| a <= b);
+    operation!(gt,  |a, b| a >  b);
+    operation!(geq, |a, b| a >= b);
+    operation!(eq,  |a, b| a == b);
+    operation!(neq, |a, b| a != b);
 
-    fn new(prog: Vec<BC>, data: Vec<Value>) -> Arch {
+    fn new(runtime: Runtime, prog: Vec<BC>, data: Vec<Value>) -> Arch {
         let new = Arch{
             ip: 0,
             fp: 0,
-            runtime: Runtime::new(),
+            runtime: runtime,
             prog: prog,
             data: data,
             stack: Vec::with_capacity(100),
@@ -278,9 +250,8 @@ impl Arch {
 
     fn invoke(&mut self) {
         match self.pop_undefer() {
-            Value::Function(addr) => self.call(addr),
-            Value::Builtin(func) => self.builtin(func),
-            Value::Addr(func) => self.syscall(func as usize),
+            Value::Function(addr)   => self.call(addr),
+            Value::Builtin(addr)    => self.builtin(addr as usize),
 
             other => panic!("not invokable: {:?}", other),
         }
@@ -318,30 +289,6 @@ impl Arch {
         return top
     }
 
-    fn builtin(&mut self, func: BuiltinFunction) {
-        use BuiltinFunction::*;
-        match func {
-            Nop     => (),
-            Except  => panic!("Builtin(Except) at {}", self.ip-1),
-            Invoke  => self.invoke(),
-            Pop     => self.pop(1),
-            Undefer => self.undefer(),
-            Add     => self.add(),
-            Div     => self.div(),
-            Mul     => self.mul(),
-            Sub     => self.sub(),
-            Eq      => self.eq(),
-            Leq     => self.leq(),
-            Lt      => self.lt(),
-            Geq     => self.geq(),
-            Gt      => self.gt(),
-            Neq     => self.neq(),
-            Car     => self.car(),
-            Cdr     => self.cdr(),
-            Cons    => self.cons(),
-        }
-    }
-
     fn exec(&mut self) {
         if ! self.prog.is_empty() {
         loop {
@@ -351,8 +298,7 @@ impl Arch {
 
             use BC::*;
             match instr {
-                Builtin(func)   => self.builtin(func),
-                Syscall(addr)   => self.syscall(addr as usize),
+                Builtin(addr)   => self.builtin(addr as usize),
                 AddA(a, b)      => self.add_a(a, b),
                 Arg(a)          => self.stack.push(self.arg(a).clone()),
                 Bne(addr)       => self.bne(addr),
@@ -367,8 +313,7 @@ impl Arch {
                 MoveArgs(argc)  => self.move_args(argc),
                 Pop(n)          => self.pop(n),
                 PushFn(addr)    => self.stack.push(Value::Function(addr)),
-                PushIns(func)   => self.stack.push(Value::Builtin(func)),
-                PushAddr(func)  => self.stack.push(Value::Addr(func)),
+                PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
                 PushInt(i)      => self.stack.push(Value::Int(i as IntType)),
                 Return(argc)    => {self.stdreturn(argc); break},
                 ReturnCall(argc) => self.returncall(argc),
@@ -378,8 +323,8 @@ impl Arch {
     }
 }
 
-pub fn execute(prog: Vec<BC>, data: Vec<Value>) {
-    let mut arch = Arch::new(prog, data);
+pub fn execute(runtime: Runtime, prog: Vec<BC>, data: Vec<Value>) {
+    let mut arch = Arch::new(runtime, prog, data);
     arch.exec();
 
     println!("{:?}", arch);

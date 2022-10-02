@@ -17,13 +17,6 @@ pub struct FunctionArg {
 pub struct FunctionBuiltin {
     name: String,
     // arity: Argc,
-    opcode: BuiltinFunction,
-}
-
-#[derive(Clone, Debug)]
-pub struct FunctionSyscall {
-    name: String,
-    // arity: Argc,
     addr: Addr,
 }
 
@@ -70,7 +63,6 @@ pub enum Function {
     Arg(RcRc<FunctionArg>),
     ArgRef(RcRc<FunctionArg>),
     Builtin(RcRc<FunctionBuiltin>),
-    Syscall(RcRc<FunctionSyscall>),
     Call(RcRc<FunctionCall>),
     Definition(RcRc<FunctionDefinition>),
     FunctionRef(RcRc<FunctionDefinition>),
@@ -115,7 +107,7 @@ pub struct Context {
 
 
 impl Context {
-    pub fn new() -> Context {
+    fn new(runtime: &Runtime) -> Context {
         let mut new = Context {
             label_index: 1,
             data: Vec::new(),
@@ -123,43 +115,8 @@ impl Context {
             used_definitions: Vec::new(),
         };
 
-        macro_rules! builtin {
-            ($instr: ident, $arity: expr, $func: literal) => {
-                let long_name = concat!("__builtin_", stringify!($instr));
-                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, $func.to_string()));
-                new.set($func.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
-            };
-            ($instr: ident, $arity: expr) => {
-                let long_name = concat!("__builtin_", stringify!($instr));
-                new.set(long_name.to_string(), FunctionBuiltin::new(BuiltinFunction::$instr, $arity, long_name.to_string()));
-            };
-        }
-
-        builtin!(Nop,       0);
-        builtin!(Except,    0);
-        builtin!(Invoke,    0);
-        builtin!(Pop,       0);
-        builtin!(Undefer,   0);
-
-        builtin!(Add,   2,  "+");
-        builtin!(Div,   2,  "/");
-        builtin!(Mul,   2,  "*");
-        builtin!(Sub,   2,  "-");
-
-        builtin!(Eq,    2,  "==");
-        builtin!(Geq,   2,  ">=");
-        builtin!(Gt,    2,  ">" );
-        builtin!(Leq,   2,  "<=");
-        builtin!(Lt,    2,  "<" );
-        builtin!(Neq,   2,  "!=");
-
-        builtin!(Car,   1,  "car");
-        builtin!(Cdr,   1,  "cdr");
-        builtin!(Cons,  2,  "cons");
-
-        let runtime = Runtime::new();
-        for (name, info) in runtime.callinfo.into_iter() {
-            new.set(name.clone(), FunctionSyscall::new(info.index as Addr, info.arity as Argc, name));
+        for (name, info) in runtime.functioninfo.iter() {
+            new.set(name.clone(), FunctionBuiltin::new(info.index as Addr, info.arity as Argc, name.clone()));
         }
 
         return new
@@ -183,6 +140,10 @@ impl Context {
         return None
     }
 
+    fn builtin_addr(&self, key: &String) -> Addr {
+        return self.stack[0].scope[key].as_builtin().borrow().addr;
+    }
+
     fn set(&mut self, name: String, function: Function) {
         let current = &mut self.stack.last_mut().unwrap().scope;
         current.insert(name, function.clone());
@@ -193,6 +154,7 @@ impl Context {
     }
 
     fn exit(&mut self) {
+        assert!(self.stack.len() > 1);
         self.stack.pop();
     }
 }
@@ -210,18 +172,8 @@ impl FunctionArg {
 }
 
 impl FunctionBuiltin {
-    pub fn new(id: BuiltinFunction, _arity: Argc, name: String) -> Function {
-        return Function::Builtin(FunctionBuiltin {
-            name: name,
-            opcode: id,
-            // arity: arity,
-        }.to_rcrc())
-    }
-}
-
-impl FunctionSyscall {
     pub fn new(addr: Addr, _arity: Argc, name: String) -> Function {
-        return Function::Syscall(FunctionSyscall {
+        return Function::Builtin(FunctionBuiltin {
             name: name,
             addr: addr,
             // arity: arity,
@@ -476,7 +428,7 @@ impl FunctionCall {
                         ]);
                     }
                     out.extend([
-                        BC::Builtin(BuiltinFunction::Invoke),
+                        BC::Builtin(ctx.builtin_addr(&"__builtin_invoke".to_string())),
                     ]);
                     if self.tail_call.is_some() {
                         out.extend([
@@ -492,23 +444,7 @@ impl FunctionCall {
                         ]);
                     }
                     out.extend([
-                        BC::Builtin(func_data.borrow().opcode.clone()),
-                    ]);
-                    if self.tail_call.is_some() {
-                        out.extend([
-                            BC::Return(0),
-                        ]);
-                    }
-                }
-
-                Function::Syscall(func_data) => {
-                    if let Some(move_args) = self.tail_call {
-                        out.extend([
-                            BC::MoveArgs(move_args),
-                        ]);
-                    }
-                    out.extend([
-                        BC::Syscall(func_data.borrow().addr.clone()),
+                        BC::Builtin(func_data.borrow().addr.clone()),
                     ]);
                     if self.tail_call.is_some() {
                         out.extend([
@@ -566,7 +502,7 @@ impl FunctionCall {
                     out.extend(func.compile_as_value());
 
                     out.extend([
-                        BC::Builtin(BuiltinFunction::Invoke),
+                        BC::Builtin(ctx.builtin_addr(&"__builtin_invoke".to_string())),
                     ]);
 
                     if self.tail_call.is_some() {
@@ -687,11 +623,10 @@ impl FunctionMatch {
             out.extend([
                 BC::Label(case_end),
             ]);
-            ctx.exit();
         }
 
         out.extend([
-            BC::Builtin(BuiltinFunction::Except),
+            BC::Builtin(ctx.builtin_addr(&"__builtin_except".to_string())),
             BC::Label(match_end),
         ]);
 
@@ -712,12 +647,12 @@ impl Function {
         }
     }
 
-    // pub fn into_arg(self) -> Option<RcRc<FunctionArg>> {
-    //     match self {
-    //         Function::Arg(fnref) => Some(fnref),
-    //         _ => None
-    //     }
-    // }
+    pub fn as_builtin(&self) -> RcRc<FunctionBuiltin> {
+        match self {
+            Function::Builtin(builtin) => builtin.clone(),
+            _ => panic!()
+        }
+    }
 
     pub fn call(&self) -> Option<&RcRc<FunctionCall>> {
         match self {
@@ -759,7 +694,6 @@ impl Function {
             Function::Arg(_)        => true,
             Function::ArgRef(_)     => true,
             Function::Builtin(_)    => true,
-            Function::Syscall(_)    => true,
             Function::FunctionRef(_) => true,
             Function::Literal(_)    => true,
             // Function::Local(_)      => true,
@@ -794,7 +728,6 @@ impl Function {
             Function::Arg(_)        => (),
             Function::ArgRef(_)     => (),
             Function::Builtin(_)    => (),
-            Function::Syscall(_)    => (),
             // Function::Local(_)      => (),
             Function::FunctionRef(_) => (),
 
@@ -840,10 +773,6 @@ impl Function {
                         *function = func_ref.clone();
                     }
 
-                    Function::Syscall(_) => {
-                        *function = func_ref.clone();
-                    }
-
                     _ => panic!("Unkn: {} {} {:?}", name, function, func_ref),
                 }
             }
@@ -858,7 +787,6 @@ impl Function {
             Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().index)),
             Function::Call(call)        => out.extend(call.borrow().compile(ctx)),
             Function::Builtin(_)        => out.extend(function.compile_as_value()),
-            Function::Syscall(_)        => out.extend(function.compile_as_value()),
             Function::Definition(fndef) => out.extend(fndef.borrow().compile(ctx)),
             Function::Literal(_)        => out.extend(function.compile_as_value()),
             Function::Match(fnmatch)    => out.extend(fnmatch.borrow().compile(ctx)),
@@ -882,13 +810,7 @@ impl Function {
 
             Function::Builtin(func_data) => {
                 return vec![
-                    BC::PushIns(func_data.borrow().opcode.clone()),
-                ];
-            }
-
-            Function::Syscall(func_data) => {
-                return vec![
-                    BC::PushAddr(func_data.borrow().addr.clone()),
+                    BC::PushIns(func_data.borrow().addr.clone()),
                 ];
             }
 
@@ -929,9 +851,7 @@ impl std::fmt::Display for Function {
                 Function::Definition(func_data) =>
                     write!(f, "{}[fn:{}]", func_data.borrow().name, func_data.borrow().label)?,
                 Function::Builtin(func_data) =>
-                    write!(f, "#{}[op:{}]", func_data.borrow().name, func_data.borrow().opcode.clone() as usize)?,
-                Function::Syscall(func_data) =>
-                    write!(f, "#{}[sys:{}]", func_data.borrow().name, func_data.borrow().addr.clone() as usize)?,
+                    write!(f, "#{}[op:{}]", func_data.borrow().name, func_data.borrow().addr.clone() as usize)?,
                 other =>
                     write!(f, "{}", other)?,
             }
@@ -942,7 +862,6 @@ impl std::fmt::Display for Function {
             Function::Arg(data) => write!(f, "${}[use:{}]", data.borrow().name, data.borrow().refs),
             Function::ArgRef(data) => write!(f, "&{}", data.borrow().name),
             Function::Builtin(_) => fmt_fn_name(f, self),
-            Function::Syscall(_) => fmt_fn_name(f, self),
 
             Function::Call(data) => {
                 let data = data.borrow();
@@ -1164,10 +1083,10 @@ fn link(program: &mut Vec<BC>) {
 }
 
 
-pub fn compile(ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Value>) {
+pub fn compile(runtime: &Runtime, ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Value>) {
     // let mut ast = ast.into_iter().map(|x| x.to_ref()).collect::<Vec<_>>();
 
-    let mut ctx = Context::new();
+    let mut ctx = Context::new(runtime);
 
     for mut el in ast.iter_mut() {
         Function::annotate(&mut ctx, &mut el);
