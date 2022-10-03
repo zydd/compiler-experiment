@@ -126,8 +126,8 @@ impl std::cmp::PartialOrd for Value {
 macro_rules! operation {
     ($func_name:ident, $function:expr) => {
         fn $func_name(&mut self) {
-            let a = self.pop_undefer();
             let b = self.pop_undefer();
+            let a = self.pop_undefer();
             let ret = $function(a, b);
             self.stack.push(ret.into());
         }
@@ -191,7 +191,7 @@ impl Arch {
     }
 
     fn arg(&self, i: Argc) -> &Value {
-        return &self.stack[self.fp as usize - 1 - i as usize]
+        return &self.stack[self.fp as usize - i as usize]
     }
 
     fn move_args(&mut self, argc: Argc) {
@@ -242,8 +242,8 @@ impl Arch {
     }
 
     fn cons(&mut self) {
-        let value = self.pop_undefer();
         let mut list = self.pop_undefer().as_list_mut();
+        let value = self.pop_undefer();
         list.push_front(value);
         self.stack.push(Value::List(list));
     }
@@ -258,8 +258,8 @@ impl Arch {
     }
 
     fn bne(&mut self, addr: Addr) {
-        let a = self.pop_undefer();
         let b = self.pop_undefer();
+        let a = self.pop_undefer();
         if a != b {
             self.ip = addr;
         }
@@ -327,5 +327,5 @@ pub fn execute(runtime: Runtime, prog: Vec<BC>, data: Vec<Value>) {
     let mut arch = Arch::new(runtime, prog, data);
     arch.exec();
 
-    println!("{:?}", arch);
+    // println!("{:?}", arch);
 }

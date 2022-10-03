@@ -8,7 +8,7 @@ type Label = Addr;
 #[derive(Debug)]
 pub struct FunctionArg {
     name: String,
-    index: Argc,
+    addr: Argc,
     // deferred: bool,
     refs: usize,
 }
@@ -135,8 +135,6 @@ impl Context {
             }
         }
 
-        println!("name not found in scope: {}", key);
-
         return None
     }
 
@@ -161,10 +159,10 @@ impl Context {
 
 
 impl FunctionArg {
-    pub fn new(index: Argc, name: String) -> FunctionArg {
+    pub fn new(addr: Argc, name: String) -> FunctionArg {
         return FunctionArg {
             name: name,
-            index: index,
+            addr: addr,
             // deferred: false,
             refs: 0,
         }
@@ -207,7 +205,7 @@ impl FunctionDefinition {
                 let body = expr.next().unwrap();
 
                 func.args = call.call().unwrap().borrow().args.iter().enumerate().map(
-                            |(i, x)| FunctionArg::new(i as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
+                            |(i, x)| FunctionArg::new(func.arity - i as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
                         ).collect();
                 func.body = body;
 
@@ -215,7 +213,7 @@ impl FunctionDefinition {
             }
         }
 
-        func.args = (0..func.arity).map(|i| FunctionArg::new(i, std::format!("arg{}", i)).to_rcrc()).collect();
+        func.args = (0..func.arity).map(|i| FunctionArg::new(func.arity - i, std::format!("arg{}", i)).to_rcrc()).collect();
 
         func.body = FunctionMatch::new(func.args.clone(), expr);
 
@@ -401,7 +399,7 @@ impl FunctionCall {
 
         let func = self.function.as_ref().unwrap();
 
-        for arg in self.args.iter().rev() {
+        for arg in self.args.iter() {
             out.extend(Function::compile(ctx, arg.clone()));
         }
 
@@ -420,7 +418,7 @@ impl FunctionCall {
             match func {
                 Function::ArgRef(arg) => {
                     out.extend([
-                        BC::Arg(arg.borrow().index),
+                        BC::Arg(arg.borrow().addr),
                     ]);
                     if let Some(move_args) = self.tail_call {
                         out.extend([
@@ -784,7 +782,7 @@ impl Function {
         let mut out = Vec::new();
 
         match &function {
-            Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().index)),
+            Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().addr)),
             Function::Call(call)        => out.extend(call.borrow().compile(ctx)),
             Function::Builtin(_)        => out.extend(function.compile_as_value()),
             Function::Definition(fndef) => out.extend(fndef.borrow().compile(ctx)),
@@ -804,7 +802,7 @@ impl Function {
         match self {
             Function::Arg(arg_data) | Function::ArgRef(arg_data) => {
                 return vec![
-                    BC::Arg(arg_data.borrow().index),
+                    BC::Arg(arg_data.borrow().addr),
                 ];
             }
 
@@ -968,7 +966,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]")
             },
-            _ => write!(f, "'{:?}", self)
+            _ => write!(f, "{:?}", self)
         }
     }
 }
@@ -1090,7 +1088,7 @@ pub fn compile(runtime: &Runtime, ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Valu
 
     for mut el in ast.iter_mut() {
         Function::annotate(&mut ctx, &mut el);
-        println!("{}\n", el);
+        // println!("{}\n", el);
     }
 
     let mut out: Vec<BC> = Vec::new();
@@ -1116,7 +1114,7 @@ pub fn compile(runtime: &Runtime, ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Valu
         }
     }
 
-    println!("\n{:?}\n", out);
+    // println!("\n{:?}\n", out);
 
     link(&mut out);
 

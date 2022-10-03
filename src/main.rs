@@ -5,7 +5,7 @@ mod compiler;
 mod bytecode;
 
 fn main() {
-    println!("BC: {}", std::mem::size_of::<bytecode::BC>());
+    // println!("BC: {}", std::mem::size_of::<bytecode::BC>());
 
     let path = std::env::args().nth(1).expect("path");
     let mut file = std::fs::File::open(path).expect("open file");
@@ -17,7 +17,7 @@ fn main() {
 
     let runtime = bytecode::runtime::Runtime::new();
     let comp = compiler::compile(&runtime, &mut ast);
-    println!("\n{:?}\n", comp.1);
+    // println!("\n{:?}\n", comp.1);
 
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {

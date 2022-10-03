@@ -1,6 +1,7 @@
 use super::*;
 
 use std::collections::HashMap;
+use std::io::Write;
 
 type Builtin = fn(arch: &mut Arch);
 
@@ -33,19 +34,20 @@ impl Runtime {
             };
         }
 
-        runtime.register("__builtin_nop", |_arch| { }, 0);
-        runtime.register("__builtin_pop", |arch| arch.pop(1), 0);
-        runtime.register("__builtin_except", Arch::except, 0);
-        runtime.register("__builtin_invoke", Arch::invoke, 0);
-        runtime.register("__builtin_undefer", Arch::undefer, 0);
+        runtime.register("__builtin_nop",   |_arch| { },        0);
+        runtime.register("__builtin_pop",   |arch| arch.pop(1), 0);
+        runtime.register("__builtin_except",    Arch::except,   0);
+        runtime.register("__builtin_invoke",    Arch::invoke,   1);
+        runtime.register("__builtin_undefer",   Arch::undefer,  1);
+        runtime.register("__builtin_debug",     Arch::debug,    1);
 
-        builtin!(car,       1);
-        builtin!(cdr,       1);
-        builtin!(cons,      2);
+        builtin!(car,   1);
+        builtin!(cdr,   1);
+        builtin!(cons,  2);
 
-        builtin!(debug,     1);
         builtin!(print,     1);
         builtin!(println,   1);
+        builtin!(putchar,   1);
 
         builtin!(add,   2,  "+");
         builtin!(div,   2,  "/");
@@ -95,13 +97,21 @@ impl Arch {
 
     fn print(self: &mut Arch) {
         print!("{}", self.pop_undefer());
+        self.stack.push(Value::None);
     }
 
     fn println(self: &mut Arch) {
         println!("{}", self.pop_undefer());
+        self.stack.push(Value::None);
     }
 
     fn except(self: &mut Arch) {
         panic!("Builtin(Except) at {}", self.ip-1);
+    }
+
+    fn putchar(self: &mut Arch) {
+        let n = self.pop_undefer().as_int();
+        std::io::stdout().write(&[n as u8]).unwrap();
+        self.stack.push(Value::None);
     }
 }
