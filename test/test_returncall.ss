@@ -19,4 +19,4 @@
 (def (eat_at_least_3_v2 a b c) (eat_all a b c))
 
 (assert_eq eat_all (eat_at_least_3 1 2 3 4 5 6))
-; (assert_eq eat_all (eat_at_least_3_v2 1 2 3 4 5 6))  ; FIXME: assertion failing
+(assert_eq eat_all (eat_at_least_3_v2 1 2 3 4 5 6))

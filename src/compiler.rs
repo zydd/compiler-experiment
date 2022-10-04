@@ -205,7 +205,7 @@ impl FunctionDefinition {
                 let body = expr.next().unwrap();
 
                 func.args = call.call().unwrap().borrow().args.iter().enumerate().map(
-                            |(i, x)| FunctionArg::new(func.arity - i as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
+                            |(i, x)| FunctionArg::new(i as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
                         ).collect();
                 func.body = body;
 
@@ -213,7 +213,7 @@ impl FunctionDefinition {
             }
         }
 
-        func.args = (0..func.arity).map(|i| FunctionArg::new(func.arity - i, std::format!("arg{}", i)).to_rcrc()).collect();
+        func.args = (0..func.arity).map(|i| FunctionArg::new(i, std::format!("arg{}", i)).to_rcrc()).collect();
 
         func.body = FunctionMatch::new(func.args.clone(), expr);
 
@@ -399,7 +399,7 @@ impl FunctionCall {
 
         let func = self.function.as_ref().unwrap();
 
-        for arg in self.args.iter() {
+        for arg in self.args.iter().rev() {
             out.extend(Function::compile(ctx, arg.clone()));
         }
 

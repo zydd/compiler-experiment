@@ -3,13 +3,21 @@
 
 
 (def (>> a b) b)
+(def (<< a b) a)
+
+(def
+    (putchars_rev [])
+        ()
+
+    (putchars_rev chars)
+        (>> (putchar (car chars)) (putchars_rev (cdr chars))))
 
 (def
     (putchars [])
         ()
 
     (putchars chars)
-        (>> (putchar (car chars)) (putchars (cdr chars))))
+        (<< (putchars (cdr chars)) (putchar (car chars))))
 
 (def
     (gen acc 0)
@@ -19,6 +27,8 @@
         (cons (+ 65 acc) (gen (+ acc 1) (- n 1))))
 
 (putchars (gen 0 26))
+(putchar 10)
+(putchars_rev (gen 0 26))
 (putchar 10)
 
 (def (pick a b c d e) a)
