@@ -285,7 +285,7 @@ impl FunctionDefinition {
 impl FunctionCall {
     pub fn new(expr: Vec<Function>) -> Function {
         assert_eq!(expr.len() > 0, true);
-        assert_eq!(matches!(expr[0], Function::Unknown(_)), true);
+        assert!(matches!(expr[0], Function::Unknown(_)), "expected identifier");
 
         if let Function::Unknown(name) = &expr[0] {
             return Function::Call(FunctionCall {
@@ -358,7 +358,7 @@ impl FunctionCall {
             // Propagate down `deferred` tag
             if call.deferred {
                 if let Function::Call(arg_call) = &mut arg {
-                arg_call.borrow_mut().deferred = true;
+                    arg_call.borrow_mut().deferred = true;
                 }
             }
 
@@ -743,7 +743,7 @@ impl Function {
             }
 
             Function::Unknown(name) => {
-                let func_ref = ctx.get(&name).unwrap();
+                let func_ref = ctx.get(&name).expect(name);
 
                 // // if func_ref is already borrowed, assume it's a function definition
                 // // referencing itself

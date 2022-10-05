@@ -99,7 +99,7 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
             Some(cur) => {
                 if state.defer_next {
                     state.defer_next = false;
-                    cur.call().unwrap().borrow_mut().deferred = true;
+                    cur.call().expect("only calls can be deferred").borrow_mut().deferred = true;
                 }
                 state.list.push(cur);
             },
