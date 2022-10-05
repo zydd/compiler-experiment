@@ -205,7 +205,7 @@ impl FunctionDefinition {
                 let body = expr.next().unwrap();
 
                 func.args = call.call().unwrap().borrow().args.iter().enumerate().map(
-                            |(i, x)| FunctionArg::new(i as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
+                            |(i, x)| FunctionArg::new((i + 1) as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
                         ).collect();
                 func.body = body;
 
@@ -213,7 +213,7 @@ impl FunctionDefinition {
             }
         }
 
-        func.args = (0..func.arity).map(|i| FunctionArg::new(i, std::format!("arg{}", i)).to_rcrc()).collect();
+        func.args = (0..func.arity).map(|i| FunctionArg::new(i + 1, std::format!("arg{}", i)).to_rcrc()).collect();
 
         func.body = FunctionMatch::new(func.args.clone(), expr);
 
@@ -412,7 +412,7 @@ impl FunctionCall {
 
             out.extend(func.compile_as_value());
             out.extend([
-                BC::Defer(self.args.len() as Argc + 1)
+                BC::Defer((self.args.len() + 1) as Argc)
             ]);
         } else {
             match func {

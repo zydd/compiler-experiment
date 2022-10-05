@@ -169,10 +169,11 @@ impl Arch {
     }
 
     fn returncall(&mut self, argc: Argc) {
-        let stack_len = self.stack.len() - argc as usize;
-        while self.stack.len() != stack_len {
+        while self.stack.len() > (self.fp + 1) as usize {
             self.invoke();
         }
+
+        assert_eq!(self.stack.len(), (self.fp + 1) as usize);
     }
 
     fn call(&mut self, addr: Addr) {
@@ -191,7 +192,7 @@ impl Arch {
     }
 
     fn arg(&self, i: Argc) -> &Value {
-        return &self.stack[self.fp as usize - 1 - i as usize]
+        return &self.stack[self.fp as usize - i as usize]
     }
 
     fn move_args(&mut self, argc: Argc) {
@@ -293,7 +294,7 @@ impl Arch {
         if ! self.prog.is_empty() {
         loop {
             let instr = self.prog[self.ip as usize].clone();
-            // println!("ip: {:3} {:?}\t{:?}", self.ip, instr, self.stack.iter().rev().take(3).collect::<Vec<_>>());
+            // println!("ip: {:3} {:?}\t{:?}", self.ip, instr, &self.stack[std::cmp::max(0, self.stack.len() as isize - 3) as usize..]);
             self.ip += 1;
 
             use BC::*;
