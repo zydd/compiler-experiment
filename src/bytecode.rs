@@ -250,9 +250,13 @@ impl Arch {
     }
 
     fn invoke(&mut self) {
-        match self.pop_undefer() {
+        match self.stack.pop().unwrap() {
             Value::Function(addr)   => self.call(addr),
             Value::Builtin(addr)    => self.builtin(addr as usize),
+            Value::Deferred(stack)  => {
+                self.stack.extend(stack);
+                self.invoke()
+            },
 
             other => panic!("not invokable: {:?}", other),
         }
@@ -281,12 +285,14 @@ impl Arch {
 
     fn pop_undefer(&mut self) -> Value {
         let mut top = self.stack.pop().unwrap();
+
         while let Value::Deferred(call) = top {
             self.stack.extend(call);
             self.invoke();
 
             top = self.stack.pop().unwrap();
         }
+
         return top
     }
 
