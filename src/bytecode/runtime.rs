@@ -34,12 +34,13 @@ impl Runtime {
             };
         }
 
-        runtime.register("__builtin_nop",   |_arch| { },        0);
-        runtime.register("__builtin_pop",   |arch| arch.pop(1), 0);
-        runtime.register("__builtin_except",    Arch::except,   0);
-        runtime.register("__builtin_invoke",    Arch::invoke,   1);
-        runtime.register("__builtin_undefer",   Arch::undefer,  1);
-        runtime.register("__builtin_debug",     Arch::debug,    1);
+        runtime.register("__builtin_nop",           |_arch| { },        0);
+        runtime.register("__builtin_pop",           |arch| arch.pop(1), 0);
+        runtime.register("__builtin_except",        Arch::except,       0);
+        runtime.register("__builtin_invoke",        Arch::invoke,       1);
+        runtime.register("__builtin_undefer",       Arch::undefer,      1);
+        runtime.register("__builtin_undefer_once",  Arch::undefer_once, 1);
+        runtime.register("__builtin_debug",         Arch::debug,        1);
 
         builtin!(car,   1);
         builtin!(cdr,   1);
@@ -101,7 +102,7 @@ impl Arch {
     }
 
     fn println(self: &mut Arch) {
-        println!("{}", self.pop_undefer());
+        println!("{}", self.stack.pop().unwrap());
         self.stack.push(Value::None);
     }
 
@@ -113,5 +114,13 @@ impl Arch {
         let n = self.pop_undefer().as_int();
         std::io::stdout().write(&[n as u8]).unwrap();
         self.stack.push(Value::None);
+    }
+
+    fn undefer_once(&mut self) {
+        if let Value::Deferred(_) = self.stack.last().unwrap() {
+            let call = self.stack.pop().unwrap().as_deferred();
+            self.stack.extend(call);
+            self.invoke();
+        }
     }
 }
