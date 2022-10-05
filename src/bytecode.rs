@@ -56,7 +56,7 @@ pub enum BC {
     PushIns(Addr),
     PushInt(i32),
     Return(Argc),
-    ReturnCall(Argc),
+    ReturnCall(),
 }
 
 
@@ -168,7 +168,7 @@ impl Arch {
         }
     }
 
-    fn returncall(&mut self, argc: Argc) {
+    fn returncall(&mut self) {
         while self.stack.len() > (self.fp + 1) as usize {
             self.invoke();
         }
@@ -323,7 +323,7 @@ impl Arch {
                 PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
                 PushInt(i)      => self.stack.push(Value::Int(i as IntType)),
                 Return(argc)    => {self.stdreturn(argc); break},
-                ReturnCall(argc) => self.returncall(argc),
+                ReturnCall() => self.returncall(),
             }
         }
         }

@@ -475,7 +475,7 @@ impl FunctionCall {
 
                     if excess_args {
                         out.extend([
-                            BC::ReturnCall(self.args.len() as Argc - func_data.borrow().arity),
+                            BC::ReturnCall(),
                         ]);
 
                         if self.tail_call.is_some() {
