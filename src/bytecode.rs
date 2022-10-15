@@ -118,7 +118,7 @@ impl std::cmp::PartialOrd for Value {
         match (self, rhs) {
             (Value::Int(a),   Value::Int(b))   => a.partial_cmp(b),
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
-            _ => None,
+            _ => panic!("invalid comparison"),
         }
     }
 }
