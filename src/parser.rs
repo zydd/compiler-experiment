@@ -8,6 +8,7 @@ use crate::bytecode::Value;
 struct ParserState {
     par: Option<char>,
     defer_next: bool,
+    strict_next: bool,
     list: Vec<Function>,
 }
 
@@ -16,6 +17,7 @@ impl ParserState {
         return ParserState{
             par: par,
             defer_next: false,
+            strict_next: false,
             list: vec![],
         }
     }
@@ -29,6 +31,7 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
         "^;[^\\n]*\
         |^\\s+\
         |^(?P<d>')\
+        |^(?P<s>!)\
         |^(?P<p>[()])\
         |^(?P<l>[\\[\\]])\
         |^\"(?P<q>[^\"\\\\]*(\\\\.[^\"\\\\]*)*)\"\
@@ -60,7 +63,7 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
 
                     if new.list.is_empty() {
                         cur = Some(FunctionLiteral::new(Value::None));
-                    } else if matches!(&new.list[0], Function::Unknown(name) if name == "def") {
+                    } else if matches!(&new.list[0], Function::Unknown(ukn) if ukn.name == "def") {
                         cur = Some(FunctionDefinition::new(new.list))
                     } else {
                         cur = Some(FunctionCall::new(new.list))
@@ -89,20 +92,30 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
         } else if cap.name("t").is_some() {
             cur = Some(Function::new(String::from(&cap[0])));
         } else if cap.name("d").is_some() {
+            assert!(!state.strict_next, "value cannot be both strict and deferred");
             state.defer_next = true;
+        } else if cap.name("s").is_some() {
+            assert!(!state.defer_next, "value cannot be both strict and deferred");
+            state.strict_next = true;
         } else {
             // println!("skip: {:?}", &cap[0])
         }
 
-        match cur {
-            None => (),
-            Some(cur) => {
-                if state.defer_next {
-                    state.defer_next = false;
-                    cur.call().expect("only calls can be deferred").borrow_mut().deferred = true;
+        if let Some(mut cur) = cur {
+            if state.defer_next {
+                state.defer_next = false;
+                match &mut cur {
+                    Function::Call(call) => call.borrow_mut().deferred = true,
+                    Function::Unknown(ukn) => ukn.deferred = true,
+                    other => panic!("only calls and args can be deferred: {:?}", other),
                 }
-                state.list.push(cur);
-            },
+            }
+            if state.strict_next {
+                state.strict_next = false;
+                cur.unknown_mut().expect("invalid strictness annotation").strict = true;
+            }
+
+            state.list.push(cur);
         }
     }
 

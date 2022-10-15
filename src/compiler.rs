@@ -9,7 +9,8 @@ type Label = Addr;
 pub struct FunctionArg {
     name: String,
     addr: Argc,
-    // deferred: bool,
+    deferred: bool,
+    strict: bool,
     refs: usize,
 }
 
@@ -55,6 +56,13 @@ pub struct FunctionMatch {
     tail_call: Option<Argc>,
 }
 
+#[derive(Clone, Debug)]
+pub struct FunctionUkn {
+    pub name: String,
+    pub deferred: bool,
+    pub strict: bool,
+}
+
 
 type RcRc<T> = std::rc::Rc<std::cell::RefCell<T>>;
 
@@ -69,7 +77,7 @@ pub enum Function {
     Literal(RcRc<FunctionLiteral>),
     // Local(RcRc<FunctionArg>),
     Match(RcRc<FunctionMatch>),
-    Unknown(String),
+    Unknown(FunctionUkn),
 }
 
 pub trait ToRcRc {
@@ -159,11 +167,12 @@ impl Context {
 
 
 impl FunctionArg {
-    pub fn new(addr: Argc, name: String) -> FunctionArg {
+    pub fn new(addr: Argc, ukn: FunctionUkn) -> FunctionArg {
         return FunctionArg {
-            name: name,
+            name: ukn.name,
             addr: addr,
-            // deferred: false,
+            deferred: ukn.deferred,
+            strict: ukn.strict,
             refs: 0,
         }
     }
@@ -183,7 +192,7 @@ impl FunctionDefinition {
     pub fn new(mut expr: Vec<Function>) -> Function {
         assert!(expr.len() >= 3);
         assert_eq!(expr.len() % 2, 1); // def + (args, body) pairs
-        assert!(matches!(&expr[0], Function::Unknown(name) if name == "def"));
+        assert!(matches!(&expr[0], Function::Unknown(ukn) if ukn.name == "def"));
 
         let mut func = FunctionDefinition {
             name: expr[1].call().unwrap().borrow().name.clone(),
@@ -198,26 +207,24 @@ impl FunctionDefinition {
         assert!(expr.iter().skip(1).step_by(2).all(|x| x.call().unwrap().borrow().name == func.name));
         expr.remove(0);
 
-        if expr.len() == 2 {
-            if expr[0].call().unwrap().borrow().args.iter().all(|x| matches!(x, Function::Unknown(_))) {
-                let mut expr = expr.into_iter();
-                let call = expr.next().unwrap();
-                let body = expr.next().unwrap();
+        if expr.len() == 2 && expr[0].call().unwrap().borrow().args.iter().all(|x| matches!(x, Function::Unknown(_))) {
+            let mut expr = expr.into_iter();
+            let call = expr.next().unwrap();
+            let body = expr.next().unwrap();
 
-                func.args = call.call().unwrap().borrow().args.iter().enumerate().map(
-                            |(i, x)| FunctionArg::new((i + 1) as Argc, x.unknown_string().unwrap().clone()).to_rcrc()
-                        ).collect();
-                func.body = body;
+            func.args = call.call().unwrap().borrow().args.iter().enumerate().map(
+                        |(i, x)| FunctionArg::new((i + 1) as Argc, x.unknown().unwrap().clone()).to_rcrc()
+                    ).collect();
+            func.body = body;
 
-                return Function::Definition(func.to_rcrc())
-            }
+            return Function::Definition(func.to_rcrc())
+        } else {
+            func.args = (0..func.arity).map(|i| FunctionArg::new(i + 1, FunctionUkn::new(std::format!("arg{}", i))).to_rcrc()).collect();
+
+            func.body = FunctionMatch::new(func.args.clone(), expr);
+
+            return Function::Definition(func.to_rcrc())
         }
-
-        func.args = (0..func.arity).map(|i| FunctionArg::new(i + 1, std::format!("arg{}", i)).to_rcrc()).collect();
-
-        func.body = FunctionMatch::new(func.args.clone(), expr);
-
-        return Function::Definition(func.to_rcrc())
     }
 
     fn annotate(ctx: &mut Context, function: &mut Function) {
@@ -287,9 +294,9 @@ impl FunctionCall {
         assert_eq!(expr.len() > 0, true);
         assert!(matches!(expr[0], Function::Unknown(_)), "expected identifier");
 
-        if let Function::Unknown(name) = &expr[0] {
+        if let Function::Unknown(ukn) = &expr[0] {
             return Function::Call(FunctionCall {
-                name: name.clone(),
+                name: ukn.name.clone(),
                 // argc: (expr.len() - 1) as Argc,
                 function: None,
                 args: expr.into_iter().skip(1).collect(),
@@ -565,8 +572,8 @@ impl FunctionMatch {
 
             for (i, arg) in pattern.iter_mut().enumerate() {
                 match &arg {
-                    Function::Unknown(name) => if name != "_" {
-                        ctx.set(name.clone(), Function::Arg(fnmatch.args[i].clone()));
+                    Function::Unknown(ukn) => if ukn.name != "_" {
+                        ctx.set(ukn.name.clone(), Function::Arg(fnmatch.args[i].clone()));
                     }
 
                     Function::Literal(_) => FunctionLiteral::annotate(ctx, arg),
@@ -633,9 +640,20 @@ impl FunctionMatch {
 }
 
 
+impl FunctionUkn {
+    pub fn new(name: String) -> FunctionUkn {
+        return FunctionUkn {
+            name: name,
+            deferred: false,
+            strict: false,
+        }
+    }
+}
+
+
 impl Function {
     pub fn new(name: String) -> Function {
-        return Function::Unknown(name)
+        Function::Unknown(FunctionUkn::new(name))
     }
 
     pub fn arg(&self) -> Option<&RcRc<FunctionArg>> {
@@ -680,9 +698,16 @@ impl Function {
         }
     }
 
-    pub fn unknown_string(&self) -> Option<&String> {
+    pub fn unknown(&self) -> Option<&FunctionUkn> {
         match self {
-            Function::Unknown(name) => Some(name),
+            Function::Unknown(ukn) => Some(&ukn),
+            _ => None
+        }
+    }
+
+    pub fn unknown_mut(&mut self) -> Option<&mut FunctionUkn> {
+        match self {
+            Function::Unknown(ref mut ukn) => Some(ukn),
             _ => None
         }
     }
@@ -742,8 +767,8 @@ impl Function {
                 ctx.exit();
             }
 
-            Function::Unknown(name) => {
-                let func_ref = ctx.get(&name).expect(name);
+            Function::Unknown(ukn) => {
+                let func_ref = ctx.get(&ukn.name).expect(&ukn.name);
 
                 // // if func_ref is already borrowed, assume it's a function definition
                 // // referencing itself
@@ -771,7 +796,7 @@ impl Function {
                         *function = func_ref.clone();
                     }
 
-                    _ => panic!("Unkn: {} {} {:?}", name, function, func_ref),
+                    _ => panic!("Unkn: {} {} {:?}", ukn.name, function, func_ref),
                 }
             }
         }
@@ -857,7 +882,20 @@ impl std::fmt::Display for Function {
         }
 
         match &self {
-            Function::Arg(data) => write!(f, "${}[use:{}]", data.borrow().name, data.borrow().refs),
+            Function::Arg(data) => {
+                let arg = data.borrow();
+
+                write!(f, "$")?;
+
+                if arg.deferred {
+                    write!(f, "'")?;
+                } else if arg.strict {
+                    write!(f, "!")?;
+                }
+
+                write!(f, "{}[use:{}]", arg.name, arg.refs)
+            }
+
             Function::ArgRef(data) => write!(f, "&{}", data.borrow().name),
             Function::Builtin(_) => fmt_fn_name(f, self),
 
@@ -940,7 +978,7 @@ impl std::fmt::Display for Function {
                 write!(f, ")")
             }
 
-            Function::Unknown(name) => write!(f, "{{{}}}", name),
+            Function::Unknown(ukn) => write!(f, "{{{}}}", ukn.name),
 
             // _ => write!(f, "{:?}", self)
         }
