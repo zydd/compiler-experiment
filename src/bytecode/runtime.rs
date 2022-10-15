@@ -24,13 +24,39 @@ impl Runtime {
         };
 
         macro_rules! builtin {
-            ($func_name:ident, $arity:expr) => {
-                runtime.register(stringify!($func_name), Arch::$func_name, $arity);
+            ($func_name:expr, $function:expr, $arity:expr) => {
+                runtime.register(concat!("__builtin_", $func_name), $function, $arity);
+                runtime.register($func_name, $function, $arity);
             };
+        }
 
-            ($func_name:ident, $arity:expr, $operator:literal) => {
-                runtime.register(concat!("__builtin_", stringify!($func_name)), Arch::$func_name, $arity);
-                runtime.register($operator, Arch::$func_name, $arity);
+        macro_rules! builtin1 {
+            ($func_name:expr, $function:expr) => {
+                {
+                    let arch_fn = |arch: &mut Arch| {
+                        let a = arch.pop_undefer();
+                        let ret = $function(a);
+                        arch.stack.push(ret.into());
+                    };
+
+                    builtin!($func_name, arch_fn, 1);
+                }
+            };
+        }
+
+        macro_rules! builtin2 {
+            ($func_name:expr, $operator:expr, $function:expr) => {
+                {
+                    let arch_fn = |arch: &mut Arch| {
+                        let a = arch.pop_undefer();
+                        let b = arch.pop_undefer();
+                        let ret = $function(a, b);
+                        arch.stack.push(ret.into());
+                    };
+
+                    builtin!($func_name, arch_fn, 2);
+                    runtime.register($operator, arch_fn, 2);
+                }
             };
         }
 
@@ -42,25 +68,26 @@ impl Runtime {
         runtime.register("__builtin_undefer_once",  Arch::undefer_once, 1);
         runtime.register("__builtin_debug",         Arch::debug,        1);
 
-        builtin!(car,   1);
-        builtin!(cdr,   1);
-        builtin!(cons,  2);
+        builtin!("car",     Arch::car,      1);
+        builtin!("cdr",     Arch::cdr,      1);
+        builtin!("cons",    Arch::cons,     2);
 
-        builtin!(print,     1);
-        builtin!(println,   1);
-        builtin!(putchar,   1);
+        builtin!("print",   Arch::print,    1);
+        builtin!("println", Arch::println,  1);
+        builtin!("putchar", Arch::putchar,  1);
 
-        builtin!(add,   2,  "+");
-        builtin!(div,   2,  "/");
-        builtin!(mul,   2,  "*");
-        builtin!(sub,   2,  "-");
+        builtin2!("add",    "+",    |a, b| a + b);
+        builtin2!("div",    "/",    |a, b| a / b);
+        builtin2!("mul",    "*",    |a, b| a * b);
+        builtin2!("sub",    "-",    |a, b| a - b);
+        builtin2!("lt",     "<",    |a, b| a <  b);
+        builtin2!("leq",    "<=",   |a, b| a <= b);
+        builtin2!("gt",     ">",    |a, b| a >  b);
+        builtin2!("geq",    ">=",   |a, b| a >= b);
+        builtin2!("eq",     "==",   |a, b| a == b);
+        builtin2!("neq",    "!=",   |a, b| a != b);
 
-        builtin!(eq,    2,  "==");
-        builtin!(geq,   2,  ">=");
-        builtin!(gt,    2,  ">" );
-        builtin!(leq,   2,  "<=");
-        builtin!(lt,    2,  "<" );
-        builtin!(neq,   2,  "!=");
+        builtin1!("sqrt", |x: Value| Value::Float(x.as_float().sqrt()));
 
         return runtime
     }

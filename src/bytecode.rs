@@ -86,6 +86,9 @@ impl Value {
     pub fn as_int(self) -> IntType {
         if let Value::Int(a) = self { a } else { panic!("expected Int: {:?}", self) }
     }
+    pub fn as_float(self) -> FloatType {
+        if let Value::Float(a) = self { a } else { panic!("expected Float: {:?}", self) }
+    }
 }
 
 impl std::convert::From<bool> for Value {
@@ -123,29 +126,7 @@ impl std::cmp::PartialOrd for Value {
     }
 }
 
-macro_rules! operation {
-    ($func_name:ident, $function:expr) => {
-        fn $func_name(&mut self) {
-            let a = self.pop_undefer();
-            let b = self.pop_undefer();
-            let ret = $function(a, b);
-            self.stack.push(ret.into());
-        }
-    };
-}
-
 impl Arch {
-    operation!(add, |a, b| a + b);
-    operation!(div, |a, b| a / b);
-    operation!(mul, |a, b| a * b);
-    operation!(sub, |a, b| a - b);
-    operation!(lt,  |a, b| a <  b);
-    operation!(leq, |a, b| a <= b);
-    operation!(gt,  |a, b| a >  b);
-    operation!(geq, |a, b| a >= b);
-    operation!(eq,  |a, b| a == b);
-    operation!(neq, |a, b| a != b);
-
     fn new(runtime: Runtime, prog: Vec<BC>, data: Vec<Value>) -> Arch {
         let new = Arch{
             ip: 0,
@@ -323,7 +304,7 @@ impl Arch {
                 PushIns(addr)   => self.stack.push(Value::Builtin(addr)),
                 PushInt(i)      => self.stack.push(Value::Int(i as IntType)),
                 Return(argc)    => {self.stdreturn(argc); break},
-                ReturnCall() => self.returncall(),
+                ReturnCall()    => self.returncall(),
             }
         }
         }
