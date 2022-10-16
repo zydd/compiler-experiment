@@ -1,4 +1,3 @@
-(def (assert True) (__builtin_nop))
 (def (assert_eq a b) (assert (== a b)))
 
 

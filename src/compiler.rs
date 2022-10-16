@@ -277,6 +277,15 @@ impl FunctionDefinition {
             out.extend(Function::compile(ctx, local.clone()));
         }
 
+        for arg in &self.args {
+            let arg = arg.borrow();
+            if arg.strict {
+                out.extend([
+                    BC::Branch(arg.addr),
+                ]);
+            }
+        }
+
         out.extend(Function::compile(ctx, self.body.clone()));
 
         if self.body.is_value() {
@@ -598,7 +607,13 @@ impl FunctionMatch {
 
             for (pat, arg) in pattern.iter().zip(&self.args) {
                 match pat {
-                    Function::Unknown(_) => (),
+                    Function::Unknown(ukn) => {
+                        if ukn.strict {
+                            out.extend([
+                                BC::Branch(arg.borrow().addr),
+                            ]);
+                        }
+                    },
 
                     Function::Literal(_) => {
                         out.extend(Function::compile(ctx, Function::ArgRef(arg.clone())));

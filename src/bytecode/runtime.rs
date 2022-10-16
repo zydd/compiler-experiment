@@ -72,9 +72,12 @@ impl Runtime {
         builtin!("cdr",     Arch::cdr,      1);
         builtin!("cons",    Arch::cons,     2);
 
-        builtin!("print",   Arch::print,    1);
-        builtin!("println", Arch::println,  1);
-        builtin!("putchar", Arch::putchar,  1);
+        builtin!("assert",      Arch::assert,       1);
+        builtin!("print",       Arch::print,        1);
+        builtin!("println",     Arch::println,      1);
+        builtin!("putchar",     Arch::putchar,      1);
+        builtin!("is_deferred", Arch::is_deferred,  1);
+        builtin!("float",       Arch::float,        1);
 
         builtin2!("add",    "+",    |a, b| a + b);
         builtin2!("div",    "/",    |a, b| a / b);
@@ -87,7 +90,8 @@ impl Runtime {
         builtin2!("eq",     "==",   |a, b| a == b);
         builtin2!("neq",    "!=",   |a, b| a != b);
 
-        builtin1!("sqrt", |x: Value| Value::Float(x.as_float().sqrt()));
+        builtin1!("sqrt",   |x: Value| Value::Float(x.as_float().sqrt()));
+        builtin1!("not",    |x: Value| Value::Bool(!x.as_bool()));
 
         return runtime
     }
@@ -161,6 +165,28 @@ impl Arch<'_> {
         let n = arch.pop_undefer().as_int();
         let i = std::cmp::max(0, arch.stack.len() as isize - n as isize) as usize;
         println!("Debug: ip: {} fp: {} stack: [{}..] {:?}", arch.ip, arch.fp, i, &arch.stack[i..])
+    }
+
+    fn float(arch: &mut Arch) {
+        let value = match arch.stack.pop().unwrap() {
+            Value::Int(i)   => i as f64,
+
+            other => panic!("value cannot be converted to float: {:?}", other),
+        };
+
+        arch.stack.push(Value::Float(value));
+    }
+
+    fn is_deferred(arch: &mut Arch) {
+        let value = arch.stack.pop().unwrap();
+        arch.stack.push(Value::Bool(matches!(value, Value::Deferred(_))));
+    }
+
+    fn assert(arch: &mut Arch) {
+        let value = arch.pop_undefer();
+        if value != Value::Bool(true) {
+            Arch::except(arch);
+        }
     }
 
     fn print(arch: &mut Arch) {

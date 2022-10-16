@@ -42,6 +42,7 @@ pub enum BC {
     AddA(Argc, Argc),
     Arg(Argc),
     Bne(Addr),
+    Branch(Argc),
     Call(Addr),
     CarA(Argc),
     CdrA(Argc),
@@ -88,6 +89,9 @@ impl Value {
     }
     pub fn as_float(self) -> FloatType {
         if let Value::Float(a) = self { a } else { panic!("expected Float: {:?}", self) }
+    }
+    pub fn as_bool(self) -> bool {
+        if let Value::Bool(a) = self { a } else { panic!("expected Bool: {:?}", self) }
     }
 }
 
@@ -217,6 +221,19 @@ impl Arch<'_> {
         }
     }
 
+    fn branch(&mut self, addr: Argc) {
+        let arg = &mut self.stack[self.fp as usize - addr as usize];
+
+        if matches!(arg, Value::Deferred(_)) {
+            let mut branch = Arch::new(self.runtime, self.prog, self.data);
+            branch.stack = std::mem::replace(arg, Value::None).as_deferred();
+            Arch::invoke(&mut branch);
+
+            assert_eq!(branch.stack.len(), 1);
+            *arg = branch.stack.pop().unwrap();
+        }
+    }
+
     fn defer(&mut self, count: Argc) {
         let tail = self.stack.split_off(self.stack.len() - count as usize);
         self.stack.push(Value::Deferred(tail));
@@ -248,6 +265,7 @@ impl Arch<'_> {
                 AddA(a, b)      => self.add_a(a, b),
                 Arg(a)          => self.stack.push(self.arg(a).clone()),
                 Bne(addr)       => self.bne(addr),
+                Branch(addr)    => self.branch(addr),
                 Call(addr)      => self.call(addr),
                 CarA(a)         => self.car_a(a),
                 CdrA(a)         => self.cdr_a(a),
