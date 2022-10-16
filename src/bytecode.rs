@@ -11,12 +11,12 @@ type FloatType = f64;
 
 
 #[derive(Debug)]
-struct Arch {
+struct Arch<'a> {
+    runtime: &'a Runtime,
+    prog: &'a Vec<BC>,
+    data: &'a Vec<Value>,
     ip: Addr,
     fp: Addr,
-    runtime: Runtime,
-    prog: Vec<BC>,
-    data: Vec<Value>,
     stack: Vec<Value>,
 }
 
@@ -126,18 +126,16 @@ impl std::cmp::PartialOrd for Value {
     }
 }
 
-impl Arch {
-    fn new(runtime: Runtime, prog: Vec<BC>, data: Vec<Value>) -> Arch {
-        let new = Arch{
-            ip: 0,
-            fp: 0,
-            runtime: runtime,
+impl Arch<'_> {
+    fn new<'a>(runtime: &'a Runtime, prog: &'a Vec<BC>, data: &'a Vec<Value>) -> Arch<'a> {
+        return Arch {
+            runtime: &runtime,
             prog: prog,
             data: data,
+            ip: 0,
+            fp: 0,
             stack: Vec::with_capacity(100),
-        };
-
-        return new
+        }
     }
 
     fn stdreturn(&mut self, argc: Argc) {
@@ -151,7 +149,7 @@ impl Arch {
 
     fn returncall(&mut self) {
         while self.stack.len() > (self.fp + 1) as usize {
-            self.invoke();
+            Arch::invoke(self);
         }
 
         assert_eq!(self.stack.len(), (self.fp + 1) as usize);
@@ -204,43 +202,11 @@ impl Arch {
         self.stack.push(head);
     }
 
-    fn car(&mut self) {
-        let head = self.pop_undefer().list().unwrap()[0].clone();
-        self.stack.push(head);
-    }
-
-    fn cdr(&mut self) {
-        let mut tail = self.pop_undefer().as_list_mut();
-        // tail.pop_front();
-        tail.remove(0);
-        self.stack.push(Value::List(tail));
-    }
-
     fn cdr_a(&mut self, list: Argc) {
         let mut tail = self.arg(list).list().unwrap().clone();
         // tail.pop_front();
         tail.remove(0);
         self.stack.push(Value::List(tail));
-    }
-
-    fn cons(&mut self) {
-        let value = self.pop_undefer();
-        let mut list = self.pop_undefer().as_list_mut();
-        list.push_front(value);
-        self.stack.push(Value::List(list));
-    }
-
-    fn invoke(&mut self) {
-        match self.stack.pop().unwrap() {
-            Value::Function(addr)   => self.call(addr),
-            Value::Builtin(addr)    => self.builtin(addr as usize),
-            Value::Deferred(stack)  => {
-                self.stack.extend(stack);
-                self.invoke()
-            },
-
-            other => panic!("not invokable: {:?}", other),
-        }
     }
 
     fn bne(&mut self, addr: Addr) {
@@ -256,20 +222,12 @@ impl Arch {
         self.stack.push(Value::Deferred(tail));
     }
 
-    fn undefer(&mut self) {
-        while let Value::Deferred(_) = self.stack.last().unwrap() {
-            let call = self.stack.pop().unwrap().as_deferred();
-            self.stack.extend(call);
-            self.invoke();
-        }
-    }
-
     fn pop_undefer(&mut self) -> Value {
         let mut top = self.stack.pop().unwrap();
 
         while let Value::Deferred(call) = top {
             self.stack.extend(call);
-            self.invoke();
+            Arch::invoke(self);
 
             top = self.stack.pop().unwrap();
         }
@@ -312,7 +270,7 @@ impl Arch {
 }
 
 pub fn execute(runtime: Runtime, prog: Vec<BC>, data: Vec<Value>) {
-    let mut arch = Arch::new(runtime, prog, data);
+    let mut arch = Arch::new(&runtime, &prog, &data);
     arch.exec();
 
     // println!("{:?}", arch);

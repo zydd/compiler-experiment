@@ -3,7 +3,7 @@ use super::*;
 use std::collections::HashMap;
 use std::io::Write;
 
-type Builtin = fn(arch: &mut Arch);
+type Builtin = fn(&mut Arch);
 
 #[derive(Debug)]
 pub(crate) struct BuiltinInfo {
@@ -112,42 +112,82 @@ impl std::fmt::Debug for Runtime {
     }
 }
 
-impl Arch {
+impl Arch<'_> {
     pub(super) fn builtin(&mut self, index: usize) {
         self.runtime.builtin[index](self);
     }
 
-    fn debug(&mut self) {
-        let n = self.pop_undefer().as_int();
-        let i = std::cmp::max(0, self.stack.len() as isize - n as isize) as usize;
-        println!("Debug: ip: {} fp: {} stack: [{}..] {:?}", self.ip, self.fp, i, &self.stack[i..])
+    pub(super) fn invoke(arch: &mut Arch) {
+        match arch.stack.pop().unwrap() {
+            Value::Function(addr)   => arch.call(addr),
+            Value::Builtin(addr)    => arch.builtin(addr as usize),
+            Value::Deferred(stack)  => {
+                arch.stack.extend(stack);
+                Arch::invoke(arch)
+            },
+
+            other => panic!("not invokable: {:?}", other),
+        }
     }
 
-    fn print(self: &mut Arch) {
-        print!("{}", self.pop_undefer());
-        self.stack.push(Value::None);
+    fn undefer(arch: &mut Arch) {
+        while let Value::Deferred(_) = arch.stack.last().unwrap() {
+            let call = arch.stack.pop().unwrap().as_deferred();
+            arch.stack.extend(call);
+            Arch::invoke(arch);
+        }
     }
 
-    fn println(self: &mut Arch) {
-        println!("{}", self.stack.pop().unwrap());
-        self.stack.push(Value::None);
+    fn car(arch: &mut Arch) {
+        let head = arch.pop_undefer().list().unwrap()[0].clone();
+        arch.stack.push(head);
     }
 
-    fn except(self: &mut Arch) {
-        panic!("Builtin(Except) at {}", self.ip-1);
+    fn cdr(arch: &mut Arch) {
+        let mut tail = arch.pop_undefer().as_list_mut();
+        // tail.pop_front();
+        tail.remove(0);
+        arch.stack.push(Value::List(tail));
     }
 
-    fn putchar(self: &mut Arch) {
-        let n = self.pop_undefer().as_int();
+    fn cons(arch: &mut Arch) {
+        let value = arch.pop_undefer();
+        let mut list = arch.pop_undefer().as_list_mut();
+        list.push_front(value);
+        arch.stack.push(Value::List(list));
+    }
+
+    fn debug(arch: &mut Arch) {
+        let n = arch.pop_undefer().as_int();
+        let i = std::cmp::max(0, arch.stack.len() as isize - n as isize) as usize;
+        println!("Debug: ip: {} fp: {} stack: [{}..] {:?}", arch.ip, arch.fp, i, &arch.stack[i..])
+    }
+
+    fn print(arch: &mut Arch) {
+        print!("{}", arch.pop_undefer());
+        arch.stack.push(Value::None);
+    }
+
+    fn println(arch: &mut Arch) {
+        println!("{}", arch.stack.pop().unwrap());
+        arch.stack.push(Value::None);
+    }
+
+    fn except(arch: &mut Arch) {
+        panic!("Builtin(Except) at {}", arch.ip-1);
+    }
+
+    fn putchar(arch: &mut Arch) {
+        let n = arch.pop_undefer().as_int();
         std::io::stdout().write(&[n as u8]).unwrap();
-        self.stack.push(Value::None);
+        arch.stack.push(Value::None);
     }
 
-    fn undefer_once(&mut self) {
-        if let Value::Deferred(_) = self.stack.last().unwrap() {
-            let call = self.stack.pop().unwrap().as_deferred();
-            self.stack.extend(call);
-            self.invoke();
+    fn undefer_once(arch: &mut Arch) {
+        if let Value::Deferred(_) = arch.stack.last().unwrap() {
+            let call = arch.stack.pop().unwrap().as_deferred();
+            arch.stack.extend(call);
+            Arch::invoke(arch);
         }
     }
 }
