@@ -13,86 +13,6 @@ type Label = Addr;
 type RcRc<T> = std::rc::Rc<std::cell::RefCell<T>>;
 
 
-#[derive(Debug)]
-pub struct FunctionArg {
-    name: String,
-    addr: Argc,
-    deferred: bool,
-    strict: bool,
-    refs: usize,
-}
-
-
-#[derive(Clone, Debug)]
-pub struct FunctionBuiltin {
-    name: String,
-    // arity: Argc,
-    addr: Addr,
-}
-
-
-#[derive(Debug)]
-pub struct FunctionCall {
-    name: String,
-    // argc: Argc,
-    function: Option<Function>,
-    args: Vec<Function>,
-    tail_call: Option<Argc>,
-    recursive: bool,
-    pub deferred: bool,
-}
-
-
-#[derive(Debug)]
-pub struct FunctionDefinition {
-    name: String,
-    arity: Argc,
-    label: Label,
-    args: Vec<RcRc<FunctionArg>>,
-    body: Function,
-    // use_count: usize,
-    locals: Vec<Function>,
-}
-
-
-#[derive(Clone, Debug)]
-pub struct FunctionLiteral {
-    data_label: Addr,
-    pub value: Value,
-}
-
-
-#[derive(Debug)]
-pub struct FunctionMatch {
-    args: Vec<RcRc<FunctionArg>>,
-    cases: Vec<(Vec<Function>, Function)>,
-    tail_call: Option<Argc>,
-}
-
-
-#[derive(Clone, Debug)]
-pub struct FunctionUkn {
-    pub name: String,
-    pub deferred: bool,
-    pub strict: bool,
-}
-
-
-#[derive(Clone, Debug)]
-pub enum Function {
-    Arg(RcRc<FunctionArg>),
-    ArgRef(RcRc<FunctionArg>),
-    Builtin(RcRc<FunctionBuiltin>),
-    Call(RcRc<FunctionCall>),
-    Definition(RcRc<FunctionDefinition>),
-    FunctionRef(RcRc<FunctionDefinition>),
-    Literal(RcRc<FunctionLiteral>),
-    // Local(RcRc<FunctionArg>),
-    Match(RcRc<FunctionMatch>),
-    Unknown(FunctionUkn),
-}
-
-
 pub trait ToRcRc {
     fn to_rcrc(self) -> RcRc<Self>;
 }
@@ -175,6 +95,86 @@ impl Context {
         assert!(self.stack.len() > 1);
         self.stack.pop();
     }
+}
+
+
+#[derive(Debug)]
+pub struct FunctionArg {
+    name: String,
+    addr: Argc,
+    deferred: bool,
+    strict: bool,
+    refs: usize,
+}
+
+
+#[derive(Clone, Debug)]
+pub struct FunctionBuiltin {
+    name: String,
+    // arity: Argc,
+    addr: Addr,
+}
+
+
+#[derive(Debug)]
+pub struct FunctionCall {
+    name: String,
+    // argc: Argc,
+    function: Option<Function>,
+    args: Vec<Function>,
+    tail_call: Option<Argc>,
+    recursive: bool,
+    pub deferred: bool,
+}
+
+
+#[derive(Debug)]
+pub struct FunctionDefinition {
+    name: String,
+    arity: Argc,
+    label: Label,
+    args: Vec<RcRc<FunctionArg>>,
+    body: Function,
+    // use_count: usize,
+    locals: Vec<Function>,
+}
+
+
+#[derive(Clone, Debug)]
+pub struct FunctionLiteral {
+    data_label: Addr,
+    pub value: Value,
+}
+
+
+#[derive(Debug)]
+pub struct FunctionMatch {
+    args: Vec<RcRc<FunctionArg>>,
+    cases: Vec<(Vec<Function>, Function)>,
+    tail_call: Option<Argc>,
+}
+
+
+#[derive(Clone, Debug)]
+pub struct FunctionUkn {
+    pub name: String,
+    pub deferred: bool,
+    pub strict: bool,
+}
+
+
+#[derive(Clone, Debug)]
+pub enum Function {
+    Arg(RcRc<FunctionArg>),
+    ArgRef(RcRc<FunctionArg>),
+    Builtin(RcRc<FunctionBuiltin>),
+    Call(RcRc<FunctionCall>),
+    Definition(RcRc<FunctionDefinition>),
+    FunctionRef(RcRc<FunctionDefinition>),
+    Literal(RcRc<FunctionLiteral>),
+    // Local(RcRc<FunctionArg>),
+    Match(RcRc<FunctionMatch>),
+    Unknown(FunctionUkn),
 }
 
 
