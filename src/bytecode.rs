@@ -2,6 +2,10 @@ pub(crate) mod runtime;
 
 use self::runtime::*;
 
+#[allow(unused_imports)]
+use crate::CONFIG;
+
+
 // type SString = smartstring::SmartString::<smartstring::Compact>;
 pub type Addr = u32;
 pub type Argc = i16;
@@ -268,7 +272,13 @@ impl Arch<'_> {
         if ! self.prog.is_empty() {
         loop {
             let instr = self.prog[self.ip as usize].clone();
-            // println!("ip: {:3} {:?}\t{:?}", self.ip, instr, &self.stack[std::cmp::max(0, self.stack.len() as isize - 300) as usize..]);
+
+            #[cfg(feature = "debug_output")]
+            if CONFIG.debug_vm {
+                let range = std::cmp::max(0, self.stack.len() as isize - 300) as usize..;
+                println!("ip: {:3} {:?}\t{:?}", self.ip, instr, &self.stack[range]);
+            }
+
             self.ip += 1;
 
             use BC::*;

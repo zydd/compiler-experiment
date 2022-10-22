@@ -1,5 +1,9 @@
 use super::*;
 
+#[allow(unused_imports)]
+use crate::CONFIG;
+
+
 impl FunctionCall {
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
@@ -389,7 +393,10 @@ pub fn compile(runtime: &Runtime, ast: &mut Vec<Function>) -> (Vec<BC>, Vec<Valu
         }
     }
 
-    // println!("\n{:?}\n", out);
+    #[cfg(feature = "debug_output")]
+    if CONFIG.print_asm {
+        println!("\n{:?}\n", out);
+    }
 
     link(&mut out);
 

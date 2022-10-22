@@ -1,8 +1,11 @@
 use std::io::Read;
 
+mod config;
 mod parser;
 mod compiler;
 mod bytecode;
+
+use config::CONFIG;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // println!("BC: {}", std::mem::size_of::<bytecode::BC>());
@@ -16,7 +19,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let runtime = bytecode::runtime::Runtime::new();
     let comp = compiler::compile(&runtime, &mut ast);
-    // println!("\n{:?}\n", comp.1);
 
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {

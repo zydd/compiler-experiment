@@ -1,3 +1,6 @@
+# See more keys and their definitions at
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
 #cargo-features = ["strip"]
 
 [package]
@@ -5,13 +8,17 @@ name = "lisp"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["debug_output"]
+debug_output = []
 
 [dependencies]
 regex = "1"
 unescape = "0.1"
 num-derive = "0.2"
 num-traits = "0.2"
+lazy_static = "1.4.0"
+clap = { version = "4.0.18", features = ["derive"] }
 #smartstring = { version = "*", features = ["proptest", "serde"] }
 
 #[profile.release]
