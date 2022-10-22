@@ -4,11 +4,10 @@ mod parser;
 mod compiler;
 mod bytecode;
 
-fn main() {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // println!("BC: {}", std::mem::size_of::<bytecode::BC>());
 
-    let path = std::env::args().nth(1).expect("path");
-    let mut file = std::fs::File::open(path).expect("open file");
+    let mut file = std::fs::File::open(&CONFIG.input).expect("open file");
 
     let mut code = String::new();
     file.read_to_string(&mut code).expect("read");
@@ -33,4 +32,6 @@ fn main() {
         .unwrap();
 
     thread.join().unwrap_or(());
+
+    Ok(())
 }

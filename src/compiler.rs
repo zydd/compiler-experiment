@@ -129,6 +129,15 @@ pub struct FunctionCall {
 
 
 #[derive(Debug)]
+pub struct FunctionCond {
+    condition: Function,
+    case_true: Function,
+    case_false: Function,
+    tail_call: Option<Argc>,
+}
+
+
+#[derive(Debug)]
 pub struct FunctionDefinition {
     name: String,
     arity: Argc,
@@ -169,6 +178,7 @@ pub enum Function {
     ArgRef(RcRc<FunctionArg>),
     Builtin(RcRc<FunctionBuiltin>),
     Call(RcRc<FunctionCall>),
+    Conditional(RcRc<FunctionCond>),
     Definition(RcRc<FunctionDefinition>),
     FunctionRef(RcRc<FunctionDefinition>),
     Literal(RcRc<FunctionLiteral>),
@@ -220,6 +230,24 @@ impl FunctionCall {
         } else {
             panic!()
         }
+    }
+}
+
+
+impl FunctionCond {
+    pub fn new(expr: Vec<Function>) -> Function {
+        assert_eq!(expr.len(), 4);
+
+        let mut expr = expr.into_iter();
+
+        expr.next(); // "if"
+
+        return Function::Conditional(FunctionCond {
+            condition: expr.next().unwrap(),
+            case_true: expr.next().unwrap(),
+            case_false: expr.next().unwrap(),
+            tail_call: None,
+        }.to_rcrc())
     }
 }
 
@@ -333,6 +361,13 @@ impl Function {
         }
     }
 
+    pub fn conditional(&self) -> Option<&RcRc<FunctionCond>> {
+        match self {
+            Function::Conditional(cond) => Some(cond),
+            _ => None
+        }
+    }
+
     pub fn literal(&self) -> Option<&RcRc<FunctionLiteral>> {
         match self {
             Function::Literal(fnref) => Some(fnref),
@@ -370,18 +405,17 @@ impl Function {
 
     pub fn is_value(&self) -> bool {
         match self {
-            Function::Arg(_)        => true,
-            Function::ArgRef(_)     => true,
-            Function::Builtin(_)    => true,
-            Function::FunctionRef(_) => true,
-            Function::Literal(_)    => true,
-            // Function::Local(_)      => true,
-
-            Function::Call(call)    => call.borrow().deferred,
-            Function::Definition(_) => panic!(),
-            Function::Match(_)      => false,
-
-            Function::Unknown(_)    => panic!(),
+            Function::Arg(_)            => true,
+            Function::ArgRef(_)         => true,
+            Function::Builtin(_)        => true,
+            Function::Call(call)        => call.borrow().deferred,
+            Function::Conditional(_)    => false,
+            Function::Definition(_)     => todo!(),
+            Function::FunctionRef(_)    => true,
+            Function::Literal(_)        => true,
+            // Function::Local(_)          => true,
+            Function::Match(_)          => false,
+            Function::Unknown(_)        => panic!(),
         }
     }
 

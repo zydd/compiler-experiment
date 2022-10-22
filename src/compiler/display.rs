@@ -60,6 +60,14 @@ impl std::fmt::Display for Function {
                 write!(f, ")")
             }
 
+            Function::Conditional(cond) => {
+                let cond = cond.borrow();
+                write!(f, "(if {}", cond.condition)?;
+                write!(f, "\n    {}", cond.case_true)?;
+                write!(f, "\n    {}", cond.case_false)?;
+                write!(f, ")")
+            }
+
             Function::Definition(data) => {
                 let data = data.borrow();
                 write!(f, "(def")?;

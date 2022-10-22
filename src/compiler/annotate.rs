@@ -96,6 +96,22 @@ impl FunctionCall {
 }
 
 
+impl FunctionCond {
+    fn annotate(ctx: &mut Context, function: &mut Function) {
+        let mut cond = function.conditional().unwrap().borrow_mut();
+        Function::annotate(ctx, &mut cond.condition);
+
+        if cond.tail_call.is_some() {
+            Function::flag_tail_call(&cond.case_true, cond.tail_call);
+            Function::flag_tail_call(&cond.case_false, cond.tail_call);
+        }
+
+        Function::annotate(ctx, &mut cond.case_true);
+        Function::annotate(ctx, &mut cond.case_false);
+    }
+}
+
+
 impl FunctionDefinition {
     fn annotate(ctx: &mut Context, function: &mut Function) {
         let mut def = function.definition().unwrap().borrow_mut();
@@ -183,15 +199,12 @@ impl FunctionMatch {
 impl Function {
     pub(crate) fn annotate(ctx: &mut Context, function: &mut Function) {
         match &function {
-            Function::Arg(_)        => (),
-            Function::ArgRef(_)     => (),
-            Function::Builtin(_)    => (),
-            // Function::Local(_)      => (),
-            Function::FunctionRef(_) => (),
-
-            Function::Call(_)       => FunctionCall::annotate(ctx, function),
-            Function::Match(_)      => FunctionMatch::annotate(ctx, function),
-            Function::Literal(_)    => FunctionLiteral::annotate(ctx, function),
+            Function::Arg(_)            => (),
+            Function::ArgRef(_)         => (),
+            Function::Builtin(_)        => (),
+            Function::Call(_)           => FunctionCall::annotate(ctx, function),
+            Function::Conditional(_)    => FunctionCond::annotate(ctx, function),
+            Function::FunctionRef(_)    => (),
 
             Function::Definition(fndef) => {
                 ctx.set(fndef.borrow().name.clone(), function.clone());
@@ -202,7 +215,11 @@ impl Function {
                 ctx.exit();
             }
 
-            Function::Unknown(ukn) => {
+            Function::Literal(_)        => FunctionLiteral::annotate(ctx, function),
+            // Function::Local(_)          => (),
+            Function::Match(_)          => FunctionMatch::annotate(ctx, function),
+
+            Function::Unknown(ukn)      => {
                 let func_ref = ctx.get(&ukn.name).expect(&ukn.name);
 
                 // // if func_ref is already borrowed, assume it's a function definition
@@ -239,8 +256,9 @@ impl Function {
 
     fn flag_tail_call(func: &Function, tail_call: Option<Argc>) {
         match func {
-            Function::Call(call) => call.borrow_mut().tail_call = tail_call,
-            Function::Match(margs) => margs.borrow_mut().tail_call = tail_call,
+            Function::Call(call)        => call.borrow_mut().tail_call = tail_call,
+            Function::Match(margs)      => margs.borrow_mut().tail_call = tail_call,
+            Function::Conditional(cond) => cond.borrow_mut().tail_call = tail_call,
             _ => ()
         }
     }

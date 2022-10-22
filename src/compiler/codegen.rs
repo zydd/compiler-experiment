@@ -126,6 +126,51 @@ impl FunctionCall {
 }
 
 
+impl FunctionCond {
+    fn compile(&self, ctx: &mut Context) -> Vec<BC> {
+        let mut out = Vec::new();
+        let else_label = ctx.new_label();
+        let if_end = ctx.new_label();
+
+        out.extend(Function::compile(ctx, self.condition.clone()));
+
+        out.extend([
+            BC::Beqz(else_label),
+        ]);
+
+        out.extend(Function::compile(ctx, self.case_true.clone()));
+
+        if self.case_true.is_value() && self.tail_call.is_some() {
+            out.extend([
+                BC::Return(self.tail_call.unwrap()),
+            ]);
+        } else {
+            out.extend([
+                BC::Jump(if_end),
+            ]);
+        }
+
+        out.extend([
+            BC::Label(else_label),
+        ]);
+
+        out.extend(Function::compile(ctx, self.case_false.clone()));
+
+        if self.case_false.is_value() && self.tail_call.is_some() {
+            out.extend([
+                BC::Return(self.tail_call.unwrap()),
+            ]);
+        }
+
+        out.extend([
+            BC::Label(if_end),
+        ]);
+
+        return out
+    }
+}
+
+
 impl FunctionDefinition {
     fn compile(&self, ctx: &mut Context) -> Vec<BC> {
         let mut out = Vec::new();
@@ -193,9 +238,8 @@ impl FunctionMatch {
             out.extend(Function::compile(ctx, body.clone()));
 
             if body.is_value() && self.tail_call.is_some() {
-                let move_args = self.tail_call.unwrap();
                 out.extend([
-                    BC::Return(move_args),
+                    BC::Return(self.tail_call.unwrap()),
                 ]);
             } else {
                 out.extend([
@@ -223,16 +267,16 @@ impl Function {
         let mut out = Vec::new();
 
         match &function {
-            Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().addr)),
-            Function::Call(call)        => out.extend(call.borrow().compile(ctx)),
-            Function::Builtin(_)        => out.extend(function.compile_as_value()),
-            Function::Definition(fndef) => out.extend(fndef.borrow().compile(ctx)),
-            Function::Literal(_)        => out.extend(function.compile_as_value()),
-            Function::Match(fnmatch)    => out.extend(fnmatch.borrow().compile(ctx)),
-            // Function::Arg(arg)          => out.push(BC::Arg(arg.index)),
             Function::Arg(_)            => panic!(),
+            Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().addr)),
+            Function::Builtin(_)        => out.extend(function.compile_as_value()),
+            Function::Call(call)        => out.extend(call.borrow().compile(ctx)),
+            Function::Conditional(cond) => out.extend(cond.borrow().compile(ctx)),
+            Function::Definition(fndef) => out.extend(fndef.borrow().compile(ctx)),
             Function::FunctionRef(_)    => out.extend(function.compile_as_value()),
+            Function::Literal(_)        => out.extend(function.compile_as_value()),
             // Function::Local(_)          => panic!(),
+            Function::Match(fnmatch)    => out.extend(fnmatch.borrow().compile(ctx)),
             Function::Unknown(_)        => panic!(),
         }
 
@@ -277,7 +321,11 @@ impl Function {
                 }
             }
 
-            Function::Call(_) | Function::Match(_) | Function::Unknown(_) => panic!(),
+            Function::Call(_)
+            | Function::Conditional(_)
+            | Function::Match(_)
+            | Function::Unknown(_)
+            => panic!(),
         }
     }
 }
@@ -299,6 +347,7 @@ fn link(program: &mut Vec<BC>) {
         match instr {
             BC::Jump(index)     => *instr = BC::Jump(map_label_addr[index]),
             BC::Bne(index)      => *instr = BC::Bne(map_label_addr[index]),
+            BC::Beqz(index)      => *instr = BC::Beqz(map_label_addr[index]),
             BC::Call(index)     => *instr = BC::Call(map_label_addr[index]),
             BC::PushFn(index)   => *instr = BC::PushFn(map_label_addr[index]),
             _ => ()

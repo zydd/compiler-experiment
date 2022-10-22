@@ -168,7 +168,10 @@ impl Arch<'_> {
     }
 
     fn float(arch: &mut Arch) {
-        let value = match arch.stack.pop().unwrap() {
+        let value = arch.pop_undefer();
+
+        let value = match value {
+            Value::Float(f) => f,
             Value::Int(i)   => i as f64,
 
             other => panic!("value cannot be converted to float: {:?}", other),

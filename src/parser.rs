@@ -65,6 +65,8 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
                         cur = Some(FunctionLiteral::new(Value::None));
                     } else if matches!(&new.list[0], Function::Unknown(ukn) if ukn.name == "def") {
                         cur = Some(FunctionDefinition::new(new.list))
+                    } else if matches!(&new.list[0], Function::Unknown(ukn) if ukn.name == "if") {
+                        cur = Some(FunctionCond::new(new.list))
                     } else {
                         cur = Some(FunctionCall::new(new.list))
                     }

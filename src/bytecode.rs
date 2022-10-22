@@ -42,6 +42,7 @@ pub enum BC {
     AddA(Argc, Argc),
     Arg(Argc),
     Bne(Addr),
+    Beqz(Addr),
     Branch(Argc),
     Call(Addr),
     CarA(Argc),
@@ -125,7 +126,7 @@ impl std::cmp::PartialOrd for Value {
         match (self, rhs) {
             (Value::Int(a),   Value::Int(b))   => a.partial_cmp(b),
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
-            _ => panic!("invalid comparison"),
+            _ => panic!("invalid comparison: {:?} {:?}", self, rhs),
         }
     }
 }
@@ -221,6 +222,17 @@ impl Arch<'_> {
         }
     }
 
+    fn bnt(&mut self, addr: Addr) {
+        let a = self.pop_undefer();
+        if let Value::Bool(result) = a {
+            if !result {
+                self.ip = addr;
+            }
+        } else {
+            panic!("expected boolean value");
+        }
+    }
+
     fn branch(&mut self, addr: Argc) {
         let arg = &mut self.stack[self.fp as usize - addr as usize];
 
@@ -256,7 +268,7 @@ impl Arch<'_> {
         if ! self.prog.is_empty() {
         loop {
             let instr = self.prog[self.ip as usize].clone();
-            // println!("ip: {:3} {:?}\t{:?}", self.ip, instr, &self.stack[std::cmp::max(0, self.stack.len() as isize - 3) as usize..]);
+            // println!("ip: {:3} {:?}\t{:?}", self.ip, instr, &self.stack[std::cmp::max(0, self.stack.len() as isize - 300) as usize..]);
             self.ip += 1;
 
             use BC::*;
@@ -265,6 +277,7 @@ impl Arch<'_> {
                 AddA(a, b)      => self.add_a(a, b),
                 Arg(a)          => self.stack.push(self.arg(a).clone()),
                 Bne(addr)       => self.bne(addr),
+                Beqz(addr)      => self.bnt(addr),
                 Branch(addr)    => self.branch(addr),
                 Call(addr)      => self.call(addr),
                 CarA(a)         => self.car_a(a),

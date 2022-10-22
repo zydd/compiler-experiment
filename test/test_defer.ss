@@ -1,12 +1,6 @@
 (def (assert_eq a b) (assert (== a b)))
 
 (def (id a) a)
-(def
-    (if 0     _ b) b
-    (if []    _ b) b
-    (if False _ b) b
-    (if _     a _) a
-)
 
 
 (def (mul acc count a b)
@@ -18,7 +12,7 @@
 
 
 (def (foldl func accum lst)
-    (if lst
+    (if (neq lst [])
         '(foldl func '(func accum '(car lst)) '(cdr lst))
         accum
 ))
