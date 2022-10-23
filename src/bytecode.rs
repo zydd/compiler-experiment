@@ -276,7 +276,18 @@ impl Arch<'_> {
             #[cfg(feature = "debug_output")]
             if CONFIG.debug_vm {
                 let range = std::cmp::max(0, self.stack.len() as isize - 300) as usize..;
-                println!("ip: {:3} {:?}\t{:?}", self.ip, instr, &self.stack[range]);
+                print!("ip: {:3} ", self.ip);
+
+                match &instr {
+                    BC::Builtin(op) =>
+                        print!("Builtin({}:{})", op, &self.runtime.builtin_name[*op as usize]),
+                    BC::PushIns(op) =>
+                        print!("PushIns({}:{})", op, &self.runtime.builtin_name[*op as usize]),
+                    other =>
+                        print!("{:?}", other),
+                }
+
+                println!("\t{:?}", &self.stack[range]);
             }
 
             self.ip += 1;

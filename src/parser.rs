@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use regex::Regex;
 use unescape::unescape;
 
@@ -41,6 +43,12 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
         |^(?P<t>[^\\s()\\[\\]]+)\
         ").unwrap();
 
+    let mut statements: HashMap<String, fn(Vec<Function>) -> Function> = HashMap::new();
+    statements.insert("def".to_string(), FunctionDefinition::new);
+    statements.insert("if".to_string(), FunctionCond::new);
+    statements.insert("seq".to_string(), FunctionSeq::new);
+    let statements = statements;
+
     let mut i = 0;
     while i < code.len() {
         let mut cur = None;
@@ -63,10 +71,12 @@ pub fn parse(code: String) -> Result<Vec<Function>, String> {
 
                     if new.list.is_empty() {
                         cur = Some(FunctionLiteral::new(Value::None));
-                    } else if matches!(&new.list[0], Function::Unknown(ukn) if ukn.name == "def") {
-                        cur = Some(FunctionDefinition::new(new.list))
-                    } else if matches!(&new.list[0], Function::Unknown(ukn) if ukn.name == "if") {
-                        cur = Some(FunctionCond::new(new.list))
+                    } else if let Function::Unknown(ukn) = &new.list[0] {
+                        if let Some(constructor) = statements.get(&ukn.name) {
+                            cur = Some(constructor(new.list))
+                        } else {
+                            cur = Some(FunctionCall::new(new.list))
+                        }
                     } else {
                         cur = Some(FunctionCall::new(new.list))
                     }

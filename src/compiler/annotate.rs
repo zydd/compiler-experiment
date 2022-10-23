@@ -196,6 +196,22 @@ impl FunctionMatch {
 }
 
 
+impl FunctionSeq {
+    fn annotate(ctx: &mut Context, function: &mut Function) {
+        let mut seq = function.seq().unwrap().borrow_mut();
+
+        for mut arg in &mut seq.args {
+            Function::annotate(ctx, &mut arg);
+        }
+
+        // Cannot perform TCO because seq constructs a list with return values
+        // if seq.tail_call.is_some() && seq.args.len() > 0 {
+        //     Function::flag_tail_call(seq.args.last().unwrap(), seq.tail_call);
+        // }
+    }
+}
+
+
 impl Function {
     pub(crate) fn annotate(ctx: &mut Context, function: &mut Function) {
         match &function {
@@ -218,6 +234,7 @@ impl Function {
             Function::Literal(_)        => FunctionLiteral::annotate(ctx, function),
             // Function::Local(_)          => (),
             Function::Match(_)          => FunctionMatch::annotate(ctx, function),
+            Function::Seq(_)            => FunctionSeq::annotate(ctx, function),
 
             Function::Unknown(ukn)      => {
                 let func_ref = ctx.get(&ukn.name).expect(&ukn.name);
@@ -256,10 +273,18 @@ impl Function {
 
     fn flag_tail_call(func: &Function, tail_call: Option<Argc>) {
         match func {
+            Function::Arg(_)            => (),
+            Function::ArgRef(_)         => (),
+            Function::Builtin(_)        => (),
             Function::Call(call)        => call.borrow_mut().tail_call = tail_call,
-            Function::Match(margs)      => margs.borrow_mut().tail_call = tail_call,
             Function::Conditional(cond) => cond.borrow_mut().tail_call = tail_call,
-            _ => ()
+            Function::Definition(_)     => (),
+            Function::FunctionRef(_)    => (),
+            Function::Literal(_)        => (),
+            // Function::Local(_)          => (),
+            Function::Match(margs)      => margs.borrow_mut().tail_call = tail_call,
+            Function::Seq(seq)          => seq.borrow_mut().tail_call = tail_call,
+            Function::Unknown(_)        => (),
         }
     }
 }

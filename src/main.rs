@@ -26,14 +26,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }));
 
-    const STACK_SIZE: usize = 1024 * 1024 * 1024;
-    let thread = std::thread::Builder::new()
-        .name("interpreter".to_string())
-        .stack_size(STACK_SIZE)
-        .spawn(|| bytecode::execute(runtime, comp.0, comp.1))
-        .unwrap();
+    if !CONFIG.compile_only {
+        const STACK_SIZE: usize = 1024 * 1024 * 1024;
+        let thread = std::thread::Builder::new()
+            .name("interpreter".to_string())
+            .stack_size(STACK_SIZE)
+            .spawn(|| bytecode::execute(runtime, comp.0, comp.1))
+            .unwrap();
 
-    thread.join().unwrap_or(());
+        thread.join().unwrap_or(());
+    }
 
     Ok(())
 }

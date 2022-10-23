@@ -266,21 +266,49 @@ impl FunctionMatch {
 }
 
 
+impl FunctionSeq {
+    fn compile(&self, ctx: &mut Context) -> Vec<BC> {
+        let mut out = Vec::new();
+
+        out.extend([
+            BC::Builtin(ctx.builtin_addr(&"__builtin_push_empty_list".to_string())),
+        ]);
+
+        for arg in self.args.iter() {
+            out.extend(Function::compile(ctx, arg.clone()));
+
+            out.extend([
+                BC::Builtin(ctx.builtin_addr(&"__builtin_cons".to_string())),
+            ]);
+        }
+
+        // if let Some(argc) = self.tail_call {
+        //     out.extend([
+        //         BC::Return(argc),
+        //     ]);
+        // }
+
+        return out
+    }
+}
+
+
 impl Function {
     fn compile(ctx: &mut Context, function: Function) -> Vec<BC> {
         let mut out = Vec::new();
 
         match &function {
             Function::Arg(_)            => panic!(),
-            Function::ArgRef(arg)       => out.push(BC::Arg(arg.borrow().addr)),
+            Function::ArgRef(data)      => out.push(BC::Arg(data.borrow().addr)),
             Function::Builtin(_)        => out.extend(function.compile_as_value()),
-            Function::Call(call)        => out.extend(call.borrow().compile(ctx)),
-            Function::Conditional(cond) => out.extend(cond.borrow().compile(ctx)),
-            Function::Definition(fndef) => out.extend(fndef.borrow().compile(ctx)),
+            Function::Call(data)        => out.extend(data.borrow().compile(ctx)),
+            Function::Conditional(data) => out.extend(data.borrow().compile(ctx)),
+            Function::Definition(data)  => out.extend(data.borrow().compile(ctx)),
             Function::FunctionRef(_)    => out.extend(function.compile_as_value()),
             Function::Literal(_)        => out.extend(function.compile_as_value()),
             // Function::Local(_)          => panic!(),
-            Function::Match(fnmatch)    => out.extend(fnmatch.borrow().compile(ctx)),
+            Function::Match(data)       => out.extend(data.borrow().compile(ctx)),
+            Function::Seq(data)         => out.extend(data.borrow().compile(ctx)),
             Function::Unknown(_)        => panic!(),
         }
 
@@ -328,6 +356,7 @@ impl Function {
             Function::Call(_)
             | Function::Conditional(_)
             | Function::Match(_)
+            | Function::Seq(_)
             | Function::Unknown(_)
             => panic!(),
         }

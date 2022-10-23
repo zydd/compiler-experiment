@@ -119,6 +119,17 @@ impl std::fmt::Display for Function {
                 write!(f, ")")
             }
 
+            Function::Seq(data) => {
+                write!(f, "(seq")?;
+
+                let data = data.borrow();
+                for arg in &data.args {
+                    write!(f, "\n    {}", arg)?;
+                }
+
+                write!(f, ")")
+            }
+
             Function::Unknown(ukn) => write!(f, "{{{}}}", ukn.name),
 
             // _ => write!(f, "{:?}", self)

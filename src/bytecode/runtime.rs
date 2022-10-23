@@ -13,6 +13,7 @@ pub(crate) struct BuiltinInfo {
 
 pub struct Runtime {
     builtin: Vec<Builtin>,
+    pub builtin_name: Vec<String>,
     pub(crate) functioninfo: HashMap<String, BuiltinInfo>,
 }
 
@@ -20,6 +21,7 @@ impl Runtime {
     pub fn new() -> Runtime {
         let mut runtime = Runtime {
             builtin: Vec::new(),
+            builtin_name: Vec::new(),
             functioninfo: HashMap::new(),
         };
 
@@ -63,6 +65,10 @@ impl Runtime {
         runtime.register("__builtin_nop",           |_arch| { },        0);
         runtime.register("__builtin_pop",           |arch| arch.pop(1), 0);
         runtime.register("__builtin_except",        Arch::except,       0);
+
+        runtime.register("__builtin_push_empty_list",
+                            |arch| arch.stack.push(Value::List(ListType::new())), 0);
+
         runtime.register("__builtin_invoke",        Arch::invoke,       1);
         runtime.register("__builtin_undefer",       Arch::undefer,      1);
         runtime.register("__builtin_undefer_once",  Arch::undefer_once, 1);
@@ -105,6 +111,7 @@ impl Runtime {
             }
         );
         self.builtin.push(func);
+        self.builtin_name.push(name.to_string());
     }
 }
 

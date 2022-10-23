@@ -164,6 +164,13 @@ pub struct FunctionMatch {
 }
 
 
+#[derive(Debug)]
+pub struct FunctionSeq {
+    args: Vec<Function>,
+    tail_call: Option<Argc>,
+}
+
+
 #[derive(Clone, Debug)]
 pub struct FunctionUkn {
     pub name: String,
@@ -184,6 +191,7 @@ pub enum Function {
     Literal(RcRc<FunctionLiteral>),
     // Local(RcRc<FunctionArg>),
     Match(RcRc<FunctionMatch>),
+    Seq(RcRc<FunctionSeq>),
     Unknown(FunctionUkn),
 }
 
@@ -324,6 +332,24 @@ impl FunctionMatch {
 }
 
 
+impl FunctionSeq {
+    pub fn new(expr: Vec<Function>) -> Function {
+        assert_eq!(expr.len() > 0, true);
+
+        if let Function::Unknown(ukn) = &expr[0] {
+            assert_eq!(ukn.name, "seq");
+
+            return Function::Seq(FunctionSeq {
+                args: expr.into_iter().skip(1).collect(),
+                tail_call: None,
+            }.to_rcrc())
+        } else {
+            panic!()
+        }
+    }
+}
+
+
 impl FunctionUkn {
     pub fn new(name: String) -> FunctionUkn {
         return FunctionUkn {
@@ -389,6 +415,13 @@ impl Function {
         }
     }
 
+    pub fn seq(&self) -> Option<&RcRc<FunctionSeq>> {
+        match self {
+            Function::Seq(seq) => Some(&seq),
+            _ => None
+        }
+    }
+
     pub fn unknown(&self) -> Option<&FunctionUkn> {
         match self {
             Function::Unknown(ukn) => Some(&ukn),
@@ -415,6 +448,7 @@ impl Function {
             Function::Literal(_)        => true,
             // Function::Local(_)          => true,
             Function::Match(_)          => false,
+            Function::Seq(_)            => true, // list of return values
             Function::Unknown(_)        => panic!(),
         }
     }
